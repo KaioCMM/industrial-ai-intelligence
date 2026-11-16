@@ -1,36 +1,121 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Industrial AI Intelligence
 
-## Getting Started
+Assistente de IA para **gestão de projetos de capital**: lê o cronograma, o
+controle de custos, o registro de riscos, os relatórios de obra e as Normas
+Regulamentadoras para ajudar a antecipar **atraso e estouro de custo**, com o
+custo, a latência e a qualidade de cada resposta visíveis na tela.
 
-First, run the development server:
+Next.js 16 · OpenAI · Supabase com pgvector · sem login (é para apresentação).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+**Documentação completa:** [docs/sistema.md](docs/sistema.md): arquitetura, o
+caminho de uma pergunta, cada módulo, métricas medidas, decisões, limitações,
+roteiro de demonstração e perguntas prováveis numa entrevista.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## O cenário
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Um projeto fictício, o **Projeto Linha 3**: expansão de uma planta de
+pelotização da Mineração Serra Azul (empresa inventada), orçamento de
+R$ 480 milhões, em execução e atrasado. Na data de corte (outubro de 2026) o
+SPI é 0,897 e o CPI é 0,921, e a estimativa no término passa da reserva de
+contingência. Documentos de obra reais são confidenciais; por isso o projeto
+foi inventado, com números consistentes entre os documentos e os dados das
+ferramentas.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+As **Normas Regulamentadoras são reais**: o texto oficial vem do gov.br.
 
-## Learn More
+## Módulos
 
-To learn more about Next.js, take a look at the following resources:
+Cada técnica é um módulo independente: pasta própria em `src/modules`, rota de
+API própria em `src/app/api` e página própria em `src/app/(painel)`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Módulo | Técnica | Código |
+|---|---|---|
+| Busca e RAG | Busca vetorial, lexical e híbrida (RRF) lado a lado, filtro por coleção, reranking com LLM, resposta com citação | `src/modules/rag` |
+| Roteamento de modelos | Classificador barato escolhe entre modelo leve, médio e forte; mostra a economia | `src/modules/roteamento` |
+| Function calling | Agente com 7 funções: cronograma, valor agregado (SPI/CPI/EAC), simulação de atraso, riscos, documentação, pedido de mudança | `src/modules/ferramentas` |
+| Avaliação com juiz | LLM-as-a-Judge com rubrica de 3 critérios e gabarito; compara configurações | `src/modules/avaliacao` |
+| Observabilidade | Tokens, custo, latência p50/p95, erros e qualidade por modelo e por módulo | `src/modules/observabilidade` |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+O núcleo compartilhado fica em `src/core`. O arquivo **`src/core/llm.ts` é o
+único que fala com a OpenAI**: ali vivem contagem de tokens, cálculo de custo,
+teto de gasto diário, timeout, retry e gravação da telemetria.
 
-## Deploy on Vercel
+## A base de conhecimento
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Três coleções na mesma tabela, filtráveis na busca:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Coleção | Conteúdo | Divisão em trechos |
+|---|---|---|
+| `projeto` | Termo de abertura, linha de base, relatório mensal, riscos, ata do comitê, diários de obra, pedidos de mudança, comissionamento, entrega, lições aprendidas, plano de segurança | Por parágrafo |
+| `conceitos` | Valor agregado (EVM), FEL e classes de estimativa | Por parágrafo |
+| `normas` | NR-01, 06, 10, 11, 12, 13, 18, 33 e 35, texto oficial | Por item numerado (35.1.2…), para a resposta citar o item |
+
+## Como rodar
+
+1. **Supabase.** No SQL Editor, rode em ordem `supabase/migrations/0001_inicial.sql`
+   e `supabase/migrations/0002_colecoes.sql`.
+2. **Variáveis.** Copie `.env.example` para `.env.local` e preencha
+   `OPENAI_API_KEY`, `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`.
+3. **Normas (opcional, recomendado).** Baixa os PDFs oficiais (cerca de 6,8 MB)
+   e grava o texto em `dados/normas/`:
+   ```bash
+   node scripts/baixar-normas.mjs
+   ```
+4. **Servidor.**
+   ```bash
+   npm install
+   npm run dev
+   ```
+5. Abra `http://localhost:3000`, clique em **Iniciar** e, em *Busca e RAG*,
+   clique em **Indexar base**.
+
+## Quanto custa (modelos padrão, preços em `src/core/precos.ts`)
+
+| Ação | Custo aproximado |
+|---|---|
+| Indexar só o projeto | menos de US$ 0,001 |
+| Indexar o projeto e as 9 NRs | o script imprime a estimativa; na ordem de US$ 0,01 |
+| Uma pergunta no RAG com reranking | cerca de US$ 0,001 |
+| Uma pergunta roteada | de US$ 0,0002 (leve) a US$ 0,008 (forte) |
+| Avaliação completa | cerca de US$ 0,02 |
+
+O `TETO_DIARIO_USD` (padrão US$ 2) bloqueia novas chamadas quando o gasto do
+dia passa do limite.
+
+## Decisões e o que foi descartado
+
+- **Um cliente só para o modelo.** Se cada módulo chamasse a OpenAI direto,
+  cada um teria de lembrar de medir custo; bastaria um esquecer para o painel mentir.
+- **pgvector no Postgres, não um banco vetorial dedicado.** São milhares de
+  trechos, não milhões. Assim a busca vetorial, a lexical e a fusão RRF rodam
+  numa consulta SQL, e a telemetria fica no mesmo banco. A busca está isolada
+  em `src/modules/rag/busca.ts`: trocar de banco não mexe no resto.
+- **Busca híbrida com RRF.** RRF funde as listas pela posição, não pelo score,
+  porque os scores vetorial e lexical estão em escalas diferentes. A lexical
+  acha códigos exatos ("PM-022", "35.1.2"); a vetorial acha paráfrases.
+- **Divisão de NR por item.** O item é o que as pessoas citam. Cortar por
+  número fixo de caracteres partiria um item ao meio e a citação ficaria errada.
+- **Contas em código, não no modelo.** SPI, CPI, EAC e o impacto de um atraso
+  são calculados pelas ferramentas; o modelo só pede o número. Modelo de
+  linguagem erra aritmética.
+- **HNSW em vez de IVFFlat.** Não exige dados para treinar o índice e tem
+  recall melhor com poucas linhas.
+- **Reranking com LLM em vez de Cohere ou cross-encoder.** Evita mais um
+  fornecedor e mais uma chave; uma chamada ao modelo leve avalia os 8 candidatos.
+- **Roteamento por classificador em vez de palavras-chave.** Regra fixa erra em
+  paráfrases e não explica a decisão; o classificador devolve o motivo.
+- **Rubrica obrigatória no juiz.** Sem critérios fixos, a nota vira opinião e
+  duas execuções não são comparáveis. A justificativa vem antes das notas e o
+  juiz roda com temperatura 0.
+- **Sem LangChain ou LlamaIndex.** Num sistema deste tamanho o framework
+  esconderia justamente custo e latência, que são o assunto da demonstração.
+- **Sem login.** O site é de apresentação. A chave `service_role` fica só no
+  servidor e as tabelas têm RLS ligada sem políticas, então a chave anônima não
+  lê nada.
+
+## Próximos passos
+
+- Streaming das respostas.
+- Agregação da telemetria em view materializada quando passar de 1.000 chamadas.
+- Cache de embeddings de perguntas repetidas.
+- Busca iterativa do pgvector (`hnsw.iterative_scan`) se a base crescer e o filtro por coleção passar a cortar resultados.

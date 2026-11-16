@@ -1,26 +1,207 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+  Direção visual: a mesma do Loc Polaris. Base clara, fria e neutra, um único
+  acento (cobalto) e vidro só no que flutua: o trilho lateral. Vidro só aparece
+  com algo atrás, por isso há um fundo colorido suave fixo atrás de tudo.
+  Verde, âmbar e vermelho só quando carregam significado.
+*/
+@theme {
+  --color-fundo: #f5f6f8;
+  --color-painel: #ffffff;
+  --color-elevado: #f0f2f5;
+  --color-linha: #e3e6eb;
+  --color-linha-forte: #cfd4dc;
+  --color-texto: #0e1525;
+  --color-suave: #465266;
+  --color-apagado: #677386;
+  --color-sinal: #1d4ed8;
+  --color-alarme: #b42318;
+  --color-normal: #13784a;
+  --color-atencao: #a35a06;
+  --color-dado: #a9bde9;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-cond: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  --vidro-aro: rgb(255 255 255 / 0.85);
+  --vidro-contorno: rgb(14 21 37 / 0.1);
+  --vidro-fundo-1: rgb(110 162 255 / 0.55);
+  --vidro-fundo-2: rgb(255 179 122 / 0.42);
+  --vidro-fundo-3: rgb(98 220 196 / 0.42);
+}
+
+html {
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-fundo);
+  color: var(--color-texto);
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1;
 }
+
+/* Manchas de cor fixas atrás de tudo: é o que o vidro do trilho desfoca. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 60% at 0% 6%, var(--vidro-fundo-1), transparent),
+    radial-gradient(36% 44% at 100% 0%, var(--vidro-fundo-2), transparent),
+    radial-gradient(40% 55% at 4% 100%, var(--vidro-fundo-3), transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-sinal);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--color-sinal);
+  color: #fff;
+}
+
+.vidro {
+  background-color: color-mix(in srgb, #fff 58%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--vidro-aro);
+  box-shadow:
+    0 8px 32px -12px rgb(14 21 37 / 0.18),
+    inset 0 1px 0 var(--vidro-aro);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .vidro {
+    background-color: #fff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Faixa zebrada de atenção: só aparece quando o gasto se aproxima do teto. */
+.listras-perigo {
+  background: repeating-linear-gradient(-45deg, var(--color-atencao) 0 6px, #fff 6px 12px);
+}
+
+/* Fluxo nos conectores da linha de processo. */
+@keyframes fluxo-horizontal {
+  to {
+    background-position: 24px 0;
+  }
+}
+@keyframes fluxo-vertical {
+  to {
+    background-position: 0 24px;
+  }
+}
+.conector-h {
+  background: repeating-linear-gradient(90deg, var(--color-sinal) 0 6px, transparent 6px 12px);
+  animation: fluxo-horizontal 1.4s linear infinite;
+}
+.conector-v {
+  background: repeating-linear-gradient(180deg, var(--color-sinal) 0 6px, transparent 6px 12px);
+  animation: fluxo-vertical 1.4s linear infinite;
+}
+.conector-inativo {
+  background: var(--color-linha-forte);
+  animation: none;
+}
+
+/* ---------- Abertura: o ícone voa da tela inicial até a marca do trilho ---------- */
+
+.abertura {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+@keyframes flutuar {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.abertura-icone {
+  display: block;
+  animation: flutuar 4s ease-in-out infinite;
+  filter: drop-shadow(0 18px 30px rgb(29 78 216 / 0.3));
+}
+.abertura.voando .abertura-icone {
+  animation: none;
+}
+
+/* No voo, só o ícone vai até o trilho: título, texto e botões somem ali mesmo. */
+.abertura-sai {
+  transition:
+    opacity 0.24s ease,
+    transform 0.24s ease;
+}
+.abertura.voando .abertura-sai {
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+}
+
+/*
+  O sistema durante a abertura: já está montado por baixo, mas escondido. O trilho
+  fica sem vidro e sem conteúdo, esperando o ícone cair no lugar da marca.
+*/
+[data-abrindo] #conteudo {
+  opacity: 0;
+}
+[data-abrindo] aside.trilho {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+[data-abrindo] aside.trilho [data-some],
+[data-abrindo] [data-marca-nome],
+[data-abrindo] [data-marca-icone] {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conector-h,
+  .conector-v,
+  .abertura-icone {
+    animation: none;
+  }
+}
+
+/* Cartão de explicação: vidro mais opaco que o do trilho, porque tem texto para ler. */
+.explicacao-cartao {
+  background-color: color-mix(in srgb, #fff 86%, transparent);
+  animation: explicacao-entrar 0.14s ease-out;
+}
+@keyframes explicacao-entrar {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .explicacao-cartao {
+    animation: none;
+  }
+}
+
+/* O esmaecimento da grade com cobrinha é desenhado dentro do próprio canvas
+   (grade-cobrinha.tsx). Uma mask-image aqui fazia a grade piscar quando a página repintava. */

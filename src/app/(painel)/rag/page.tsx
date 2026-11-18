@@ -47,7 +47,7 @@ const TERMO_DO_MODO: Record<ModoBusca, Termo> = { vetorial: "busca-vetorial", le
 
 const MODOS: { valor: ModoBusca; nome: string; explicacao: string }[] = [
   { valor: "vetorial", nome: "Vetorial", explicacao: "Significado: acha sinônimos e paráfrases, mas pode errar códigos e siglas." },
-  { valor: "lexical", nome: "Lexical", explicacao: "Palavras exatas: acerta códigos como PM-022 ou o item 35.1.2, mas não entende paráfrase." },
+  { valor: "lexical", nome: "Lexical", explicacao: "Palavras exatas: acerta códigos como PM-022 ou o item 35.2.1, mas não entende paráfrase." },
   { valor: "hibrida", nome: "Híbrida (RRF)", explicacao: "Funde as duas listas pela posição: pega o melhor de cada uma." },
 ];
 

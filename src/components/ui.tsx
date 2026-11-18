@@ -364,14 +364,14 @@ export function CustoDaRequisicao({ resumo }: { resumo: ResumoRastro }) {
   );
 }
 
-/** Texto do modelo: preserva quebras, destaca **negrito** e as citações [n]. */
+/** Texto do modelo: preserva quebras, destaca **negrito** e as citações [n] e [n, item 35.2.1]. */
 export function TextoResposta({ texto }: { texto: string }) {
-  const partes = texto.split(/(\*\*[^*]+\*\*|\[\d+\])/g);
+  const partes = texto.split(/(\*\*[^*]+\*\*|\[\d+(?:[,;][^\]]{1,40})?\])/g);
   return (
     <div className="max-w-[72ch] text-[17px] leading-relaxed whitespace-pre-wrap">
       {partes.map((p, i) => {
         if (/^\*\*[^*]+\*\*$/.test(p)) return <strong key={i} className="font-semibold">{p.slice(2, -2)}</strong>;
-        if (/^\[\d+\]$/.test(p))
+        if (/^\[\d+(?:[,;][^\]]{1,40})?\]$/.test(p))
           return (
             <sup key={i} className="ml-0.5 font-semibold text-sinal">
               {p}

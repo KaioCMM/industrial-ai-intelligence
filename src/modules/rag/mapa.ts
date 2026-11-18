@@ -1,5 +1,5 @@
 import "server-only";
-import { obterSupabase } from "@/core/supabase";
+import { lerEmPaginas, obterSupabase } from "@/core/supabase";
 import type { MapaEmbeddings } from "./tipos";
 
 // Mapa dos embeddings: cada trecho tem 1.536 números; para desenhar na tela, o vetor
@@ -81,18 +81,9 @@ interface LinhaDocumento {
 
 async function calcular(): Promise<Projecao> {
   const supabase = obterSupabase();
-  const linhas: LinhaDocumento[] = [];
-  // O Supabase devolve no máximo 1.000 linhas por consulta: lê em páginas.
-  for (let inicio = 0; ; inicio += 1000) {
-    const { data, error } = await supabase
-      .from("documentos")
-      .select("id, colecao, fonte, titulo, conteudo, embedding")
-      .order("id")
-      .range(inicio, inicio + 999);
-    if (error) throw new Error(`Falha ao ler os embeddings: ${error.message}`);
-    linhas.push(...(data as LinhaDocumento[]));
-    if (data.length < 1000) break;
-  }
+  const linhas = await lerEmPaginas<LinhaDocumento>("Falha ao ler os embeddings", (inicio, fim) =>
+    supabase.from("documentos").select("id, colecao, fonte, titulo, conteudo, embedding").order("id").range(inicio, fim),
+  );
   if (linhas.length < 3) throw new Error("A base tem poucos trechos para montar o mapa. Indexe a base primeiro.");
 
   // O pgvector chega pela API como texto "[0.1,0.2,...]".

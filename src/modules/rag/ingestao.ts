@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { DIMENSAO_EMBEDDING, MODELOS } from "@/core/config";
 import { embeddings } from "@/core/llm";
-import { obterSupabase, supabaseConfigurado } from "@/core/supabase";
+import { lerEmPaginas, obterSupabase, supabaseConfigurado } from "@/core/supabase";
 import type { Rastro } from "@/core/tipos";
 import { CORPUS, type Colecao, type DocumentoFonte } from "./corpus";
 import { invalidarMapa } from "./mapa";
@@ -92,8 +92,11 @@ export async function estadoDaBase(): Promise<EstadoBase> {
   if (!supabaseConfigurado()) {
     return { configurado: false, trechos: 0, documentos: 0, documentosNoCorpus, porColecao: {} };
   }
-  const { data, error } = await obterSupabase().from("documentos").select("fonte, colecao");
-  if (error) throw new Error(`Falha ao ler a base: ${error.message}. As migrações SQL já foram rodadas?`);
+  const supabase = obterSupabase();
+  const data = await lerEmPaginas<{ fonte: string; colecao: string }>(
+    "Falha ao ler a base (as migrações SQL já foram rodadas?)",
+    (inicio, fim) => supabase.from("documentos").select("fonte, colecao").order("id").range(inicio, fim),
+  );
   const porColecao = data.reduce<Record<string, number>>((acc, d) => ({ ...acc, [d.colecao]: (acc[d.colecao] ?? 0) + 1 }), {});
   return {
     configurado: true,

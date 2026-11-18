@@ -4,6 +4,7 @@ import { resumirRastro } from "@/core/tipos";
 import { CONJUNTO_AVALIACAO } from "@/modules/avaliacao/conjunto";
 import { descreverConfiguracao, julgar, salvarJulgamento } from "@/modules/avaliacao/juiz";
 import type { ResultadoCaso } from "@/modules/avaliacao/tipos";
+import { formatarContexto } from "@/modules/rag/contexto";
 import { executarRag } from "@/modules/rag/pipeline";
 import type { ModoBusca } from "@/modules/rag/tipos";
 
@@ -33,7 +34,8 @@ export async function POST(req: Request) {
         pergunta: caso.pergunta,
         resposta: r.resposta,
         referencia: caso.referencia,
-        contexto: r.contexto.map((t) => t.conteudo).join("\n\n"),
+        // O mesmo contexto que o modelo recebeu, com fonte e título.
+        contexto: formatarContexto(r.contexto),
       },
       rastro,
     );

@@ -167,6 +167,76 @@ export async function chat(params: ParametrosChat, rastro: Rastro, operacao: str
 }
 
 /**
+ * Chat em fluxo (streaming): repassa cada pedaço de texto assim que o modelo o escreve.
+ * O tempo total não muda, mas a primeira palavra chega em menos de um segundo depois do
+ * início da geração, em vez de o usuário esperar a resposta inteira.
+ * O uso de tokens vem no último pedaço (include_usage), então custo e telemetria
+ * continuam exatos, como nas chamadas sem fluxo.
+ */
+export async function chatEmFluxo(
+  params: ParametrosChat,
+  rastro: Rastro,
+  operacao: string,
+  aoReceber?: (pedaco: string) => void,
+): Promise<{ texto: string; primeiroTokenMs: number | null }> {
+  const { temperatura, raciocinio, ...resto } = params;
+  const cliente = clienteOpenAI();
+  await verificarTeto();
+
+  const esforco = esforcoPara(params.model, raciocinio);
+  const inicio = performance.now();
+  let primeiroTokenMs: number | null = null;
+  let texto = "";
+  let tokensEntrada = 0;
+  let tokensSaida = 0;
+  try {
+    const fluxo = await cliente.chat.completions.create({
+      ...resto,
+      ...(temperatura !== undefined && aceitaTemperatura(params.model, esforco) ? { temperature: temperatura } : {}),
+      ...(esforco ? { reasoning_effort: esforco } : {}),
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    for await (const parte of fluxo) {
+      const pedaco = parte.choices[0]?.delta?.content;
+      if (pedaco) {
+        primeiroTokenMs ??= performance.now() - inicio;
+        texto += pedaco;
+        aoReceber?.(pedaco);
+      }
+      if (parte.usage) {
+        tokensEntrada = parte.usage.prompt_tokens;
+        tokensSaida = parte.usage.completion_tokens;
+      }
+    }
+    await registrar(rastro, {
+      modulo: rastro.modulo,
+      operacao,
+      modelo: params.model,
+      tokensEntrada,
+      tokensSaida,
+      custoUsd: custoUsd(params.model, tokensEntrada, tokensSaida),
+      latenciaMs: performance.now() - inicio,
+      status: "ok",
+    });
+    return { texto: texto.trim(), primeiroTokenMs };
+  } catch (e) {
+    await registrar(rastro, {
+      modulo: rastro.modulo,
+      operacao,
+      modelo: params.model,
+      tokensEntrada,
+      tokensSaida,
+      custoUsd: custoUsd(params.model, tokensEntrada, tokensSaida),
+      latenciaMs: performance.now() - inicio,
+      status: "erro",
+      erro: e instanceof Error ? e.message : String(e),
+    });
+    throw e;
+  }
+}
+
+/**
  * Chat com saída estruturada (JSON Schema estrito). Usado por quem precisa de
  * um número ou rótulo, não de texto livre: roteador, reranker, juiz.
  */

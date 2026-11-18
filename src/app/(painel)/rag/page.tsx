@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Explicacao } from "@/components/explicacao";
 import { TempoPorEtapa } from "@/components/graficos";
 import {
   Alternador,
@@ -17,11 +18,11 @@ import {
   Secao,
   TextoResposta,
 } from "@/components/ui";
-import { Explicacao } from "@/components/explicacao";
 import { chamarApi } from "@/lib/api";
+import { fmtDecimal, fmtMs, fmtUsd } from "@/lib/formato";
 import type { Termo } from "@/lib/glossario";
-import { fmtDecimal, fmtUsd } from "@/lib/formato";
-import type { EstadoBase, FiltroColecao, ModoBusca, RespostaRag, Trecho } from "@/modules/rag/tipos";
+import { formatarContexto } from "@/modules/rag/contexto";
+import type { EstadoBase, EventoRag, FiltroColecao, ModoBusca, RespostaJulgamento, Trecho } from "@/modules/rag/tipos";
 
 const EXEMPLOS = [
   "Por que o Projeto Linha 3 está atrasado?",
@@ -48,6 +49,9 @@ const MODOS: { valor: ModoBusca; nome: string; explicacao: string }[] = [
   { valor: "lexical", nome: "Lexical", explicacao: "Palavras exatas: acerta códigos como PM-022 ou o item 35.1.2, mas não entende paráfrase." },
   { valor: "hibrida", nome: "Híbrida (RRF)", explicacao: "Funde as duas listas pela posição: pega o melhor de cada uma." },
 ];
+
+type EventoBusca = Extract<EventoRag, { tipo: "busca" }>;
+type EventoFim = Extract<EventoRag, { tipo: "fim" }>;
 
 function ListaBusca({ modo, trechos, usados }: { modo: (typeof MODOS)[number]; trechos: Trecho[]; usados: Set<number> }) {
   return (
@@ -97,7 +101,15 @@ export default function PaginaRag() {
   const [avaliar, setAvaliar] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [resultado, setResultado] = useState<RespostaRag | null>(null);
+
+  // A resposta chega em partes: busca pronta, pedaços de texto, fim. Cada uma aparece quando existe.
+  const [busca, setBusca] = useState<EventoBusca | null>(null);
+  const [texto, setTexto] = useState("");
+  const [fim, setFim] = useState<EventoFim | null>(null);
+  // Medidos aqui, do lado de quem usa: é o tempo que a pessoa sente.
+  const [percebido, setPercebido] = useState<{ buscas: number | null; primeiraPalavra: number | null }>({ buscas: null, primeiraPalavra: null });
+  const [juiz, setJuiz] = useState<RespostaJulgamento | null>(null);
+  const [julgando, setJulgando] = useState(false);
 
   const [base, setBase] = useState<EstadoBase | null>(null);
   const [indexando, setIndexando] = useState(false);
@@ -124,16 +136,82 @@ export default function PaginaRag() {
   async function perguntar() {
     setCarregando(true);
     setErro(null);
+    setBusca(null);
+    setTexto("");
+    setFim(null);
+    setJuiz(null);
+    setPercebido({ buscas: null, primeiraPalavra: null });
+    const inicio = performance.now();
+    let eventoBusca: EventoBusca | null = null;
+    let eventoFim: EventoFim | null = null;
+
     try {
-      setResultado(await chamarApi<RespostaRag>("/api/rag", { pergunta, modo, colecao, reranquear, avaliar }));
+      const resposta = await fetch("/api/rag", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pergunta, modo, colecao, reranquear }),
+      });
+      if (!resposta.ok || !resposta.body) {
+        const json = await resposta.json().catch(() => ({}));
+        throw new Error(json.erro ?? `A requisição falhou com status ${resposta.status}.`);
+      }
+
+      // Lê o fluxo linha a linha: cada linha é um evento JSON completo.
+      const leitor = resposta.body.getReader();
+      const decodificador = new TextDecoder();
+      let pendente = "";
+      let primeiraPalavraVista = false;
+      for (;;) {
+        const { done, value } = await leitor.read();
+        if (done) break;
+        pendente += decodificador.decode(value, { stream: true });
+        const linhas = pendente.split("\n");
+        pendente = linhas.pop() ?? "";
+        for (const linha of linhas) {
+          if (!linha.trim()) continue;
+          const evento = JSON.parse(linha) as EventoRag;
+          if (evento.tipo === "busca") {
+            eventoBusca = evento;
+            setBusca(evento);
+            setPercebido((p) => ({ ...p, buscas: performance.now() - inicio }));
+          } else if (evento.tipo === "texto") {
+            if (!primeiraPalavraVista) {
+              primeiraPalavraVista = true;
+              setPercebido((p) => ({ ...p, primeiraPalavra: performance.now() - inicio }));
+            }
+            setTexto((t) => t + evento.pedaco);
+          } else if (evento.tipo === "fim") {
+            eventoFim = evento;
+            setFim(evento);
+          } else {
+            throw new Error(evento.erro);
+          }
+        }
+      }
     } catch (e) {
       setErro(e instanceof Error ? e.message : String(e));
     } finally {
       setCarregando(false);
+      window.dispatchEvent(new Event("telemetria:atualizada"));
+    }
+
+    // O juiz roda depois, fora do caminho da resposta: ela já está na tela enquanto a nota é calculada.
+    if (avaliar && eventoBusca && eventoFim) {
+      setJulgando(true);
+      chamarApi<RespostaJulgamento>("/api/rag/julgar", {
+        pergunta,
+        resposta: eventoFim.resposta,
+        contexto: formatarContexto(eventoBusca.contexto),
+        modo,
+        reranquear,
+      })
+        .then(setJuiz)
+        .catch((e) => setErro(`A resposta saiu, mas o juiz falhou: ${e instanceof Error ? e.message : String(e)}`))
+        .finally(() => setJulgando(false));
     }
   }
 
-  const usados = new Set(resultado?.contexto.map((t) => t.id));
+  const usados = new Set(busca?.contexto.map((t) => t.id));
   const baseVazia = base?.configurado && base.trechos === 0;
 
   return (
@@ -190,7 +268,7 @@ export default function PaginaRag() {
           <Interruptor
             rotulo="Avaliar com o juiz"
             termo="llm-juiz"
-            detalhe="Nota de fidelidade, relevância e completude"
+            detalhe="A nota chega depois da resposta"
             ligado={avaliar}
             aoMudar={setAvaliar}
           />
@@ -208,7 +286,7 @@ export default function PaginaRag() {
         </div>
       )}
 
-      {resultado && (
+      {busca && (
         <>
           <Secao
             titulo="As três buscas lado a lado"
@@ -217,16 +295,16 @@ export default function PaginaRag() {
           >
             <div className="grid gap-4 lg:grid-cols-3">
               {MODOS.map((m) => (
-                <ListaBusca key={m.valor} modo={m} trechos={resultado.comparacao[m.valor]} usados={usados} />
+                <ListaBusca key={m.valor} modo={m} trechos={busca.comparacao[m.valor]} usados={usados} />
               ))}
             </div>
           </Secao>
 
-          {resultado.reranking && (
+          {busca.reranking && (
             <Secao
               titulo="Reranking"
               termo="reranking"
-              descricao="A busca compara vetores; o reranker lê a pergunta e o trecho juntos e julga se o trecho responde. Os 4 primeiros viram o contexto."
+              descricao={`A busca compara vetores; o reranker lê a pergunta e o trecho juntos e julga se o trecho responde. Dos ${busca.candidatos.length} candidatos, os 4 primeiros viram o contexto.`}
             >
               <Painel className="overflow-x-auto">
                 <table className="w-full min-w-[620px] text-left">
@@ -239,7 +317,7 @@ export default function PaginaRag() {
                     </tr>
                   </thead>
                   <tbody className="tabular-nums">
-                    {resultado.reranking.map((t, i) => {
+                    {busca.reranking.map((t, i) => {
                       const subiu = t.posicaoOriginal - (i + 1);
                       return (
                         <tr key={t.id} className="border-t border-linha">
@@ -264,45 +342,65 @@ export default function PaginaRag() {
 
           <Secao titulo="Resposta" termo="contexto">
             <Painel className="px-6 py-6">
-              <TextoResposta texto={resultado.resposta} />
+              {texto ? (
+                <TextoResposta texto={texto} />
+              ) : (
+                <p className="text-suave">{carregando ? "O modelo está começando a escrever…" : "Sem resposta."}</p>
+              )}
+              {/* Cursor piscando enquanto a resposta chega; some quando termina. */}
+              {carregando && texto && <span className="ml-0.5 inline-block h-5 w-[2px] translate-y-1 animate-pulse bg-sinal" aria-hidden="true" />}
               <ol className="mt-6 space-y-1 border-t border-linha pt-4 text-sm text-suave">
-                {resultado.contexto.map((t, i) => (
+                {busca.contexto.map((t, i) => (
                   <li key={t.id}>
-                    <span className="font-semibold text-sinal">[{i + 1}]</span> {t.titulo}{" "}
-                    <span className="text-apagado">({t.fonte})</span>
+                    <span className="font-semibold text-sinal">[{i + 1}]</span> {t.titulo} <span className="text-apagado">({t.fonte})</span>
                   </li>
                 ))}
               </ol>
             </Painel>
           </Secao>
 
-          {resultado.julgamento && (
-            <Secao titulo="Nota do juiz" termo="rubrica" descricao={`Avaliada por ${resultado.julgamento.modeloJuiz} com rubrica fixa.`}>
-              <Painel className="grid gap-6 px-6 py-5 md:grid-cols-[auto_1fr]">
-                <div className="space-y-2">
-                  <Nota rotulo="Fidelidade" termo="fidelidade" valor={resultado.julgamento.fidelidade} />
-                  <Nota rotulo="Relevância" termo="relevancia" valor={resultado.julgamento.relevancia} />
-                  <Nota rotulo="Completude" termo="completude" valor={resultado.julgamento.completude} />
-                </div>
-                <p className="max-w-[60ch] leading-relaxed text-suave">{resultado.julgamento.justificativa}</p>
-              </Painel>
+          {(julgando || juiz) && (
+            <Secao
+              titulo="Nota do juiz"
+              termo="rubrica"
+              descricao={juiz ? `Avaliada por ${juiz.julgamento.modeloJuiz} com rubrica fixa, em ${fmtMs(juiz.juizMs)}, depois da resposta.` : undefined}
+            >
+              {juiz ? (
+                <Painel className="grid gap-6 px-6 py-5 md:grid-cols-[auto_1fr]">
+                  <div className="space-y-2">
+                    <Nota rotulo="Fidelidade" termo="fidelidade" valor={juiz.julgamento.fidelidade} />
+                    <Nota rotulo="Relevância" termo="relevancia" valor={juiz.julgamento.relevancia} />
+                    <Nota rotulo="Completude" termo="completude" valor={juiz.julgamento.completude} />
+                  </div>
+                  <p className="max-w-[60ch] leading-relaxed text-suave">{juiz.julgamento.justificativa}</p>
+                </Painel>
+              ) : (
+                <p className="text-suave">O juiz está avaliando a resposta…</p>
+              )}
             </Secao>
           )}
-
-          <Secao titulo="Para onde foi o tempo" termo="tempo-etapa">
-            <Painel className="mb-4 px-5 py-4">
-              <TempoPorEtapa
-                etapas={[
-                  { nome: "Busca", ms: resultado.tempos.buscaMs },
-                  { nome: "Reranking", ms: resultado.tempos.rerankMs },
-                  { nome: "Geração", ms: resultado.tempos.geracaoMs },
-                  { nome: "Juiz", ms: resultado.tempos.juizMs },
-                ]}
-              />
-            </Painel>
-            <CustoDaRequisicao resumo={resultado.resumo} />
-          </Secao>
         </>
+      )}
+
+      {fim && (
+        <Secao titulo="Para onde foi o tempo" termo="tempo-etapa">
+          <Painel className="mb-4 px-5 py-4">
+            <p className="mb-4 text-[15px] text-suave">
+              As buscas apareceram em <span className="font-semibold text-texto">{fmtMs(percebido.buscas ?? 0)}</span>, a primeira palavra
+              em <span className="font-semibold text-texto">{fmtMs(percebido.primeiraPalavra ?? 0)}</span> e a resposta completa em{" "}
+              <span className="font-semibold text-texto">{fmtMs(fim.resumo.latenciaMs)}</span>.
+            </p>
+            <TempoPorEtapa
+              etapas={[
+                { nome: "Busca", ms: fim.tempos.buscaMs },
+                { nome: "Reranking", ms: fim.tempos.rerankMs },
+                { nome: "Geração", ms: fim.tempos.geracaoMs },
+                { nome: "Juiz (depois)", ms: juiz?.juizMs ?? 0 },
+              ]}
+            />
+          </Painel>
+          <CustoDaRequisicao resumo={fim.resumo} />
+        </Secao>
       )}
     </>
   );

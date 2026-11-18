@@ -24,17 +24,35 @@ export interface TrechoReranqueado extends Trecho {
   posicaoOriginal: number;
 }
 
-export interface RespostaRag {
-  modo: ModoBusca;
-  colecao: FiltroColecao;
-  reranqueado: boolean;
-  comparacao: Record<ModoBusca, Trecho[]>;
-  candidatos: Trecho[];
-  reranking: TrechoReranqueado[] | null;
-  contexto: Trecho[];
-  resposta: string;
-  julgamento: Julgamento | null;
-  tempos: { buscaMs: number; rerankMs: number; geracaoMs: number; juizMs: number };
+/**
+ * A rota /api/rag responde em fluxo: uma linha JSON por evento (NDJSON).
+ * A tela mostra as buscas assim que chega "busca", escreve a resposta a cada "texto"
+ * e preenche tempos e custo no "fim". O juiz roda depois, numa chamada à parte.
+ */
+export type EventoRag =
+  | {
+      tipo: "busca";
+      modo: ModoBusca;
+      colecao: FiltroColecao;
+      reranqueado: boolean;
+      comparacao: Record<ModoBusca, Trecho[]>;
+      candidatos: Trecho[];
+      reranking: TrechoReranqueado[] | null;
+      contexto: Trecho[];
+      tempos: { buscaMs: number; rerankMs: number };
+    }
+  | { tipo: "texto"; pedaco: string }
+  | {
+      tipo: "fim";
+      resposta: string;
+      tempos: { buscaMs: number; rerankMs: number; geracaoMs: number; primeiroTokenMs: number | null };
+      resumo: ResumoRastro;
+    }
+  | { tipo: "erro"; erro: string };
+
+export interface RespostaJulgamento {
+  julgamento: Julgamento;
+  juizMs: number;
   resumo: ResumoRastro;
 }
 

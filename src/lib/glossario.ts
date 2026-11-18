@@ -87,6 +87,12 @@ export const GLOSSARIO = {
       "Uma segunda passada que reordena os candidatos da busca. A busca compara pergunta e trecho separadamente; o reranker lê os dois juntos e julga se o trecho responde de fato à pergunta.",
     aqui: "Um modelo leve (gpt-6-luna) dá nota de 0 a 10 aos 12 candidatos numa única chamada, lendo os primeiros 700 caracteres de cada um, e os 4 melhores viram o contexto. Custa menos de um décimo de centavo de dólar.",
   },
+  streaming: {
+    titulo: "Streaming da resposta",
+    oQueE:
+      "O modelo escreve a resposta aos poucos, e cada pedaço é mostrado assim que chega. O tempo total quase não muda, mas a pessoa vê a primeira palavra em vez de uma tela parada: é o tempo percebido que cai.",
+    aqui: "A rota responde em fluxo: as buscas aparecem assim que o contexto fica pronto, a resposta vem palavra a palavra e o juiz roda depois, fora do caminho da resposta.",
+  },
   contexto: {
     titulo: "Contexto e citação",
     oQueE:

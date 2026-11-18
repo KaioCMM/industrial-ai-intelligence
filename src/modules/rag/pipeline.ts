@@ -1,8 +1,9 @@
 import "server-only";
 import { PARAMETROS } from "@/core/config";
-import { chat } from "@/core/llm";
+import { chatEmFluxo } from "@/core/llm";
 import type { Rastro } from "@/core/tipos";
 import { buscar, buscarNosTresModos } from "./busca";
+import { formatarContexto } from "./contexto";
 import type { Colecao } from "./corpus";
 import { reranquear } from "./rerank";
 import type { FiltroColecao, ModoBusca, Trecho, TrechoReranqueado } from "./tipos";
@@ -21,11 +22,14 @@ Responda em português, de forma direta, usando SOMENTE as informações dos tre
 Cite a fonte de cada afirmação com o número do trecho entre colchetes, como [1] ou [2]. Quando o trecho for de uma NR, cite também o número do item.
 Se os trechos não contêm a resposta, diga exatamente que a documentação disponível não cobre esse assunto. Não complete com conhecimento geral.`;
 
-export async function gerarResposta(pergunta: string, contexto: Trecho[], rastro: Rastro): Promise<string> {
-  const trechos = contexto
-    .map((t, i) => `[${i + 1}] ${t.fonte}: ${t.titulo}\n${t.conteudo}`)
-    .join("\n\n");
-  const resposta = await chat(
+export async function gerarResposta(
+  pergunta: string,
+  contexto: Trecho[],
+  rastro: Rastro,
+  aoReceber?: (pedaco: string) => void,
+): Promise<{ texto: string; primeiroTokenMs: number | null }> {
+  const trechos = formatarContexto(contexto);
+  return chatEmFluxo(
     {
       model: PARAMETROS.respostaRag.modelo,
       messages: [
@@ -38,26 +42,33 @@ export async function gerarResposta(pergunta: string, contexto: Trecho[], rastro
     },
     rastro,
     "resposta-rag",
+    aoReceber,
   );
-  return resposta.choices[0]?.message.content?.trim() ?? "";
 }
 
-export interface ResultadoPipeline {
+export interface ResultadoBusca {
   comparacao: Record<ModoBusca, Trecho[]> | null;
   candidatos: Trecho[];
   reranking: TrechoReranqueado[] | null;
   contexto: Trecho[];
+  tempos: { buscaMs: number; rerankMs: number };
+}
+
+export interface ResultadoPipeline extends ResultadoBusca {
   resposta: string;
-  tempos: { buscaMs: number; rerankMs: number; geracaoMs: number };
+  tempos: { buscaMs: number; rerankMs: number; geracaoMs: number; primeiroTokenMs: number | null };
 }
 
 /**
- * Busca → (reranking) → geração. Com `comparar`, roda os três modos de busca
+ * Busca → (reranking) → geração em fluxo. Com `comparar`, roda os três modos de busca
  * para a página mostrar a diferença; sem ele (avaliação), roda só o modo escolhido.
+ * `aoBuscar` é chamado assim que o contexto está pronto, e `aoReceber` a cada pedaço
+ * da resposta: a tela mostra cada parte no momento em que ela existe.
  */
 export async function executarRag(
   opcoes: { pergunta: string; modo: ModoBusca; reranquear: boolean; comparar: boolean; colecao?: FiltroColecao },
   rastro: Rastro,
+  avisos: { aoBuscar?: (r: ResultadoBusca) => void; aoReceber?: (pedaco: string) => void } = {},
 ): Promise<ResultadoPipeline> {
   const colecao: Colecao | null = !opcoes.colecao || opcoes.colecao === "todas" ? null : opcoes.colecao;
 
@@ -76,10 +87,18 @@ export async function executarRag(
   const reranking = opcoes.reranquear ? await reranquear(opcoes.pergunta, candidatos, CONTEXTO_FINAL, rastro) : null;
   const rerankMs = performance.now() - t;
   const contexto = reranking ?? candidatos.slice(0, CONTEXTO_FINAL);
+  avisos.aoBuscar?.({ comparacao, candidatos, reranking, contexto, tempos: { buscaMs, rerankMs } });
 
   t = performance.now();
-  const resposta = await gerarResposta(opcoes.pergunta, contexto, rastro);
+  const { texto, primeiroTokenMs } = await gerarResposta(opcoes.pergunta, contexto, rastro, avisos.aoReceber);
   const geracaoMs = performance.now() - t;
 
-  return { comparacao, candidatos, reranking, contexto, resposta, tempos: { buscaMs, rerankMs, geracaoMs } };
+  return {
+    comparacao,
+    candidatos,
+    reranking,
+    contexto,
+    resposta: texto,
+    tempos: { buscaMs, rerankMs, geracaoMs, primeiroTokenMs },
+  };
 }

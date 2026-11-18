@@ -1,4 +1,5 @@
 import "server-only";
+import { after } from "next/server";
 import OpenAI from "openai";
 import type {
   ChatCompletion,
@@ -35,10 +36,9 @@ export function novoRastro(modulo: Modulo): Rastro {
 // ---------- teto de gasto ----------
 
 let gastoEmCache: { valor: number; lidoEm: number } | null = null;
+let leituraEmAndamento: Promise<number> | null = null;
 
-export async function gastoDeHoje(): Promise<number> {
-  if (!supabaseConfigurado()) return 0;
-  if (gastoEmCache && Date.now() - gastoEmCache.lidoEm < 10_000) return gastoEmCache.valor;
+async function lerGastoDoBanco(): Promise<number> {
   const { data, error } = await obterSupabase().rpc("gasto_do_dia");
   if (error) {
     console.warn(JSON.stringify({ evento: "teto.leitura_falhou", erro: error.message }));
@@ -48,8 +48,25 @@ export async function gastoDeHoje(): Promise<number> {
   return gastoEmCache.valor;
 }
 
+/** Gasto do dia com no máximo 10 s de atraso. Leituras simultâneas compartilham a mesma consulta. */
+export async function gastoDeHoje(): Promise<number> {
+  if (!supabaseConfigurado()) return 0;
+  if (gastoEmCache && Date.now() - gastoEmCache.lidoEm < 10_000) return gastoEmCache.valor;
+  leituraEmAndamento ??= lerGastoDoBanco().finally(() => (leituraEmAndamento = null));
+  return leituraEmAndamento;
+}
+
 async function verificarTeto() {
-  const gasto = await gastoDeHoje();
+  // Com um valor já guardado, o teto usa ele na hora e atualiza em segundo plano se estiver
+  // velho: a consulta (~150 ms) sai do caminho da resposta. Para um teto diário, alguns
+  // segundos de defasagem não mudam nada; cada chamada também soma seu custo ao valor guardado.
+  let gasto: number;
+  if (gastoEmCache) {
+    gasto = gastoEmCache.valor;
+    if (Date.now() - gastoEmCache.lidoEm >= 10_000) void gastoDeHoje();
+  } else {
+    gasto = await gastoDeHoje();
+  }
   if (gasto >= TETO_DIARIO_USD) {
     throw new ErroTetoGasto(
       `Teto diário de US$ ${TETO_DIARIO_USD.toFixed(2)} atingido (gasto hoje: US$ ${gasto.toFixed(4)}). Aumente TETO_DIARIO_USD no .env.local se quiser continuar.`,
@@ -70,20 +87,30 @@ async function registrar(rastro: Rastro, chamada: ChamadaLLM) {
   }
 
   if (!supabaseConfigurado()) return;
-  const { error } = await obterSupabase().from("chamadas_llm").insert({
-    trace_id: rastro.traceId,
-    modulo: chamada.modulo,
-    operacao: chamada.operacao,
-    modelo: chamada.modelo,
-    tokens_entrada: chamada.tokensEntrada,
-    tokens_saida: chamada.tokensSaida,
-    custo_usd: chamada.custoUsd,
-    latencia_ms: Math.round(chamada.latenciaMs),
-    status: chamada.status,
-    erro: chamada.erro ?? null,
-  });
-  // Falha de telemetria não derruba a resposta ao usuário: só fica registrada no log.
-  if (error) console.warn(JSON.stringify({ evento: "telemetria.falhou", erro: error.message }));
+  const gravar = async () => {
+    const { error } = await obterSupabase().from("chamadas_llm").insert({
+      trace_id: rastro.traceId,
+      modulo: chamada.modulo,
+      operacao: chamada.operacao,
+      modelo: chamada.modelo,
+      tokens_entrada: chamada.tokensEntrada,
+      tokens_saida: chamada.tokensSaida,
+      custo_usd: chamada.custoUsd,
+      latencia_ms: Math.round(chamada.latenciaMs),
+      status: chamada.status,
+      erro: chamada.erro ?? null,
+    });
+    // Falha de telemetria não derruba a resposta ao usuário: só fica registrada no log.
+    if (error) console.warn(JSON.stringify({ evento: "telemetria.falhou", erro: error.message }));
+  };
+  // A gravação (~120 ms) roda depois que a resposta é enviada, com o after() do Next:
+  // antes, cada chamada esperava a linha ser gravada para seguir. Fora de uma requisição
+  // (um script, por exemplo) o after() não existe, e aí grava esperando, como antes.
+  try {
+    after(gravar);
+  } catch {
+    await gravar();
+  }
 }
 
 // O cliente manda só os parâmetros que o modelo aceita (regras em regras-modelo.ts,

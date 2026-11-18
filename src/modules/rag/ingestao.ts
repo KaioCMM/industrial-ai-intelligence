@@ -6,6 +6,7 @@ import { embeddings } from "@/core/llm";
 import { obterSupabase, supabaseConfigurado } from "@/core/supabase";
 import type { Rastro } from "@/core/tipos";
 import { CORPUS, type Colecao, type DocumentoFonte } from "./corpus";
+import { invalidarMapa } from "./mapa";
 import type { EstadoBase } from "./tipos";
 import { dividirEmTrechos, dividirNorma } from "./trechos";
 
@@ -79,6 +80,8 @@ export async function ingerirCorpus(rastro: Rastro) {
     if (error) throw new Error(`Falha ao gravar os trechos: ${error.message}. A migração 0002_colecoes.sql já foi rodada?`);
   }
 
+  // A base mudou: o mapa dos embeddings e o cache de perguntas precisam ser refeitos.
+  invalidarMapa();
   const porColecao = linhas.reduce<Record<string, number>>((acc, l) => ({ ...acc, [l.colecao]: (acc[l.colecao] ?? 0) + 1 }), {});
   return { documentos: documentos.length, trechos: linhas.length, porColecao };
 }

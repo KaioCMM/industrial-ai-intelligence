@@ -51,7 +51,7 @@ export async function POST(req: Request) {
             }),
           aoReceber: (pedaco) => enviar({ tipo: "texto", pedaco }),
         });
-        enviar({ tipo: "fim", resposta: r.resposta, tempos: r.tempos, resumo: resumirRastro(rastro) });
+        enviar({ tipo: "fim", resposta: r.resposta, tempos: r.tempos, pontoPergunta: r.pontoPergunta, resumo: resumirRastro(rastro) });
       } catch (e) {
         // O status HTTP já foi enviado (200); o erro vai como evento, com a mesma frase das outras rotas.
         const { erro } = await respostaDeErro(e).json();

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Explicacao } from "@/components/explicacao";
 import { TempoPorEtapa } from "@/components/graficos";
+import { MapaEmbeddings } from "@/components/mapa-embeddings";
 import {
   Alternador,
   Aviso,
@@ -213,6 +214,9 @@ export default function PaginaRag() {
 
   const usados = new Set(busca?.contexto.map((t) => t.id));
   const baseVazia = base?.configurado && base.trechos === 0;
+  const destaqueMapa = busca
+    ? { pergunta: fim?.pontoPergunta ?? null, candidatos: busca.candidatos.map((t) => t.id), contexto: busca.contexto.map((t) => t.id) }
+    : null;
 
   return (
     <>
@@ -381,6 +385,18 @@ export default function PaginaRag() {
           )}
         </>
       )}
+
+      <Secao
+        titulo="Mapa dos embeddings"
+        termo="mapa-embeddings"
+        descricao={
+          busca
+            ? "Cada ponto é um trecho da base. O losango é a sua pergunta, ligado aos trechos que a busca trouxe; os maiores, com borda branca, viraram o contexto."
+            : "Cada ponto é um trecho da base, posicionado pelo significado. Faça uma pergunta para ver onde ela cai e quais trechos a busca alcança."
+        }
+      >
+        <MapaEmbeddings destaque={destaqueMapa} />
+      </Secao>
 
       {fim && (
         <Secao titulo="Para onde foi o tempo" termo="tempo-etapa">

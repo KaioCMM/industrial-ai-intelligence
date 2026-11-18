@@ -87,6 +87,12 @@ export const GLOSSARIO = {
       "Uma segunda passada que reordena os candidatos da busca. A busca compara pergunta e trecho separadamente; o reranker lê os dois juntos e julga se o trecho responde de fato à pergunta.",
     aqui: "Um modelo leve (gpt-6-luna) dá nota de 0 a 10 aos 12 candidatos numa única chamada, lendo os primeiros 700 caracteres de cada um, e os 4 melhores viram o contexto. Custa menos de um décimo de centavo de dólar.",
   },
+  "mapa-embeddings": {
+    titulo: "Mapa dos embeddings (PCA)",
+    oQueE:
+      "Cada trecho é um vetor de 1.536 números. Para desenhar na tela, a PCA encontra as duas direções em que os vetores mais variam e projeta cada um nelas. Pontos próximos tendem a ter significado parecido, mas reduzir 1.536 dimensões a 2 perde informação: o mapa mostra grupos, não a distância exata.",
+    aqui: "A projeção dos 843 trechos é calculada uma vez no servidor, sem biblioteca, e guardada. A pergunta é projetada nos mesmos dois eixos, em paralelo com o reranking, então não soma tempo à resposta.",
+  },
   streaming: {
     titulo: "Streaming da resposta",
     oQueE:

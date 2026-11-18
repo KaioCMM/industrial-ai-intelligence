@@ -46,6 +46,7 @@ export type EventoRag =
       tipo: "fim";
       resposta: string;
       tempos: { buscaMs: number; rerankMs: number; geracaoMs: number; primeiroTokenMs: number | null };
+      pontoPergunta: [number, number] | null;
       resumo: ResumoRastro;
     }
   | { tipo: "erro"; erro: string };
@@ -54,6 +55,22 @@ export interface RespostaJulgamento {
   julgamento: Julgamento;
   juizMs: number;
   resumo: ResumoRastro;
+}
+
+export interface PontoMapa {
+  id: number;
+  colecao: string;
+  fonte: string;
+  titulo: string;
+  previa: string;
+  x: number;
+  y: number;
+}
+
+export interface MapaEmbeddings {
+  pontos: PontoMapa[];
+  /** Fração da variação total explicada por cada um dos dois eixos. */
+  variancia: [number, number];
 }
 
 export interface EstadoBase {

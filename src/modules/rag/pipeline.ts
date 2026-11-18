@@ -5,6 +5,7 @@ import type { Rastro } from "@/core/tipos";
 import { buscar, buscarNosTresModos } from "./busca";
 import { formatarContexto } from "./contexto";
 import type { Colecao } from "./corpus";
+import { projetarNoMapa } from "./mapa";
 import { reranquear } from "./rerank";
 import type { FiltroColecao, ModoBusca, Trecho, TrechoReranqueado } from "./tipos";
 
@@ -57,6 +58,7 @@ export interface ResultadoBusca {
 export interface ResultadoPipeline extends ResultadoBusca {
   resposta: string;
   tempos: { buscaMs: number; rerankMs: number; geracaoMs: number; primeiroTokenMs: number | null };
+  pontoPergunta: [number, number] | null;
 }
 
 /**
@@ -75,9 +77,14 @@ export async function executarRag(
   let t = performance.now();
   let comparacao: Record<ModoBusca, Trecho[]> | null = null;
   let candidatos: Trecho[];
+  let ponto: Promise<[number, number] | null> = Promise.resolve(null);
   if (opcoes.comparar) {
-    comparacao = await buscarNosTresModos(opcoes.pergunta, CANDIDATOS, rastro, colecao);
+    const busca = await buscarNosTresModos(opcoes.pergunta, CANDIDATOS, rastro, colecao);
+    comparacao = busca.comparacao;
     candidatos = comparacao[opcoes.modo];
+    // Projeção da pergunta no mapa em paralelo com o reranking e a geração: não soma tempo.
+    // Se o mapa falhar, a resposta segue sem o ponto.
+    ponto = projetarNoMapa(busca.vetor).catch(() => null);
   } else {
     candidatos = await buscar(opcoes.pergunta, opcoes.modo, CANDIDATOS, rastro, colecao);
   }
@@ -100,5 +107,6 @@ export async function executarRag(
     contexto,
     resposta: texto,
     tempos: { buscaMs, rerankMs, geracaoMs, primeiroTokenMs },
+    pontoPergunta: await ponto,
   };
 }

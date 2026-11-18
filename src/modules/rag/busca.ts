@@ -107,7 +107,7 @@ export async function buscarNosTresModos(pergunta: string, quantidade: number, r
     lexicalPronta,
     buscarHibrida(pergunta, vetor, quantidade, colecao),
   ]);
-  return { vetorial, lexical, hibrida } satisfies Record<ModoBusca, Trecho[]>;
+  return { comparacao: { vetorial, lexical, hibrida } satisfies Record<ModoBusca, Trecho[]>, vetor };
 }
 
 /** Busca num modo só: usada pelas ferramentas do agente e pela avaliação. */

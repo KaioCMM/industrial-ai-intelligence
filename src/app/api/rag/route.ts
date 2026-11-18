@@ -30,10 +30,18 @@ export async function POST(req: Request) {
     return respostaDeErro(e);
   }
 
+  // Quem fecha a aba ou sai da tela cancela o fluxo. O cancelamento desce até a OpenAI
+  // (pipeline → llm.ts): sem isso, ela continuaria gerando, e cobrando, até o fim.
+  const cancelamento = new AbortController();
+  req.signal.addEventListener("abort", () => cancelamento.abort(), { once: true });
+
   const codificador = new TextEncoder();
   const fluxo = new ReadableStream<Uint8Array>({
     async start(controle) {
-      const enviar = (evento: EventoRag) => controle.enqueue(codificador.encode(`${JSON.stringify(evento)}\n`));
+      // Depois do cancelamento o fluxo já está fechado, e escrever nele lançaria erro.
+      const enviar = (evento: EventoRag) => {
+        if (!cancelamento.signal.aborted) controle.enqueue(codificador.encode(`${JSON.stringify(evento)}\n`));
+      };
       const rastro = novoRastro("rag");
       try {
         const r = await executarRag({ ...opcoes, comparar: true }, rastro, {
@@ -50,15 +58,21 @@ export async function POST(req: Request) {
               tempos: b.tempos,
             }),
           aoReceber: (pedaco) => enviar({ tipo: "texto", pedaco }),
+          sinal: cancelamento.signal,
         });
         enviar({ tipo: "fim", resposta: r.resposta, tempos: r.tempos, pontoPergunta: r.pontoPergunta, resumo: resumirRastro(rastro) });
       } catch (e) {
+        // Cancelado: ninguém está lendo, então não há erro para enviar nem para logar.
+        if (cancelamento.signal.aborted) return;
         // O status HTTP já foi enviado (200); o erro vai como evento, com a mesma frase das outras rotas.
         const { erro } = await respostaDeErro(e).json();
         enviar({ tipo: "erro", erro });
       } finally {
-        controle.close();
+        if (!cancelamento.signal.aborted) controle.close();
       }
+    },
+    cancel() {
+      cancelamento.abort();
     },
   });
 

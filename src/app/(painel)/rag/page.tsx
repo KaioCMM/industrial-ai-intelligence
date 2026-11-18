@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Explicacao } from "@/components/explicacao";
 import { TempoPorEtapa } from "@/components/graficos";
 import { MapaEmbeddings } from "@/components/mapa-embeddings";
@@ -120,6 +120,11 @@ export default function PaginaRag() {
     chamarApi<EstadoBase>("/api/rag/base").then(setBase).catch((e) => setMsgBase(e.message));
   }, []);
 
+  // Sair da tela no meio da resposta cancela o pedido. Numa navegação dentro do app a aba
+  // continua aberta, então sem isso o fluxo seguiria lendo, e a OpenAI gerando, em segundo plano.
+  const pedidoAtual = useRef<AbortController | null>(null);
+  useEffect(() => () => pedidoAtual.current?.abort(), []);
+
   async function indexar() {
     setIndexando(true);
     setMsgBase(null);
@@ -145,12 +150,16 @@ export default function PaginaRag() {
     const inicio = performance.now();
     let eventoBusca: EventoBusca | null = null;
     let eventoFim: EventoFim | null = null;
+    pedidoAtual.current?.abort();
+    const pedido = new AbortController();
+    pedidoAtual.current = pedido;
 
     try {
       const resposta = await fetch("/api/rag", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ pergunta, modo, colecao, reranquear }),
+        signal: pedido.signal,
       });
       if (!resposta.ok || !resposta.body) {
         const json = await resposta.json().catch(() => ({}));
@@ -190,7 +199,8 @@ export default function PaginaRag() {
         }
       }
     } catch (e) {
-      setErro(e instanceof Error ? e.message : String(e));
+      // Cancelado porque a pessoa saiu da tela: não há erro para mostrar.
+      if (!pedido.signal.aborted) setErro(e instanceof Error ? e.message : String(e));
     } finally {
       setCarregando(false);
       window.dispatchEvent(new Event("telemetria:atualizada"));

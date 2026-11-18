@@ -185,9 +185,12 @@ export async function chatEmFluxo(
   rastro: Rastro,
   operacao: string,
   aoReceber?: (pedaco: string) => void,
+  sinal?: AbortSignal,
 ): Promise<{ texto: string; primeiroTokenMs: number | null }> {
   const { temperatura, raciocinio, ...resto } = params;
   const cliente = clienteOpenAI();
+  // Quem pediu já saiu: nem chama a OpenAI, e nada vai para a telemetria.
+  sinal?.throwIfAborted();
   await verificarTeto();
 
   const esforco = esforcoPara(params.model, raciocinio);
@@ -197,13 +200,18 @@ export async function chatEmFluxo(
   let tokensEntrada = 0;
   let tokensSaida = 0;
   try {
-    const fluxo = await cliente.chat.completions.create({
-      ...resto,
-      ...(temperatura !== undefined && aceitaTemperatura(params.model, esforco) ? { temperature: temperatura } : {}),
-      ...(esforco ? { reasoning_effort: esforco } : {}),
-      stream: true,
-      stream_options: { include_usage: true },
-    });
+    const fluxo = await cliente.chat.completions.create(
+      {
+        ...resto,
+        ...(temperatura !== undefined && aceitaTemperatura(params.model, esforco) ? { temperature: temperatura } : {}),
+        ...(esforco ? { reasoning_effort: esforco } : {}),
+        stream: true,
+        stream_options: { include_usage: true },
+      },
+      // O cancelamento chega à OpenAI: a geração para, em vez de seguir (e ser cobrada)
+      // até o fim de uma resposta que ninguém vai ler.
+      { signal: sinal },
+    );
     for await (const parte of fluxo) {
       const pedaco = parte.choices[0]?.delta?.content;
       if (pedaco) {
@@ -237,7 +245,9 @@ export async function chatEmFluxo(
       custoUsd: custoUsd(params.model, tokensEntrada, tokensSaida),
       latenciaMs: performance.now() - inicio,
       status: "erro",
-      erro: e instanceof Error ? e.message : String(e),
+      // Cancelada no meio, a linha fica com custo 0: o uso só vem no último pedaço do fluxo,
+      // e os tokens gerados até ali (que a OpenAI cobra) não chegam a ser informados.
+      erro: sinal?.aborted ? "cancelada: quem pediu saiu antes do fim da resposta" : e instanceof Error ? e.message : String(e),
     });
     throw e;
   }

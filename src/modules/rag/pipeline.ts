@@ -28,6 +28,7 @@ export async function gerarResposta(
   contexto: Trecho[],
   rastro: Rastro,
   aoReceber?: (pedaco: string) => void,
+  sinal?: AbortSignal,
 ): Promise<{ texto: string; primeiroTokenMs: number | null }> {
   const trechos = formatarContexto(contexto);
   return chatEmFluxo(
@@ -44,6 +45,7 @@ export async function gerarResposta(
     rastro,
     "resposta-rag",
     aoReceber,
+    sinal,
   );
 }
 
@@ -66,11 +68,13 @@ export interface ResultadoPipeline extends ResultadoBusca {
  * para a página mostrar a diferença; sem ele (avaliação), roda só o modo escolhido.
  * `aoBuscar` é chamado assim que o contexto está pronto, e `aoReceber` a cada pedaço
  * da resposta: a tela mostra cada parte no momento em que ela existe.
+ * `sinal` cancela o resto do caminho quando quem pediu sai: o reranking não começa e a
+ * geração para na OpenAI.
  */
 export async function executarRag(
   opcoes: { pergunta: string; modo: ModoBusca; reranquear: boolean; comparar: boolean; colecao?: FiltroColecao },
   rastro: Rastro,
-  avisos: { aoBuscar?: (r: ResultadoBusca) => void; aoReceber?: (pedaco: string) => void } = {},
+  avisos: { aoBuscar?: (r: ResultadoBusca) => void; aoReceber?: (pedaco: string) => void; sinal?: AbortSignal } = {},
 ): Promise<ResultadoPipeline> {
   const colecao: Colecao | null = !opcoes.colecao || opcoes.colecao === "todas" ? null : opcoes.colecao;
 
@@ -89,6 +93,7 @@ export async function executarRag(
     candidatos = await buscar(opcoes.pergunta, opcoes.modo, CANDIDATOS, rastro, colecao);
   }
   const buscaMs = performance.now() - t;
+  avisos.sinal?.throwIfAborted();
 
   t = performance.now();
   const reranking = opcoes.reranquear ? await reranquear(opcoes.pergunta, candidatos, CONTEXTO_FINAL, rastro) : null;
@@ -97,7 +102,7 @@ export async function executarRag(
   avisos.aoBuscar?.({ comparacao, candidatos, reranking, contexto, tempos: { buscaMs, rerankMs } });
 
   t = performance.now();
-  const { texto, primeiroTokenMs } = await gerarResposta(opcoes.pergunta, contexto, rastro, avisos.aoReceber);
+  const { texto, primeiroTokenMs } = await gerarResposta(opcoes.pergunta, contexto, rastro, avisos.aoReceber, avisos.sinal);
   const geracaoMs = performance.now() - t;
 
   return {

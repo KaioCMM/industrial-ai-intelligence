@@ -57,8 +57,24 @@ async function rpc(funcao: string, args: Record<string, unknown>): Promise<Trech
   return (data as LinhaBanco[]).map(paraTrecho);
 }
 
+// Cache do embedding da pergunta: o mesmo texto gera sempre o mesmo vetor, então
+// repetir uma pergunta (comum numa demonstração, e na avaliação) não precisa pagar
+// de novo os ~0,5 s e a chamada. Fica em memória, limitado às 300 perguntas mais recentes.
+const CACHE_MAXIMO = 300;
+const cacheEmbedding = new Map<string, number[]>();
+
 export async function embeddingDaPergunta(pergunta: string, rastro: Rastro): Promise<number[]> {
+  const chave = `${MODELOS.embedding}:${pergunta.trim().toLowerCase().replace(/\s+/g, " ")}`;
+  const guardado = cacheEmbedding.get(chave);
+  if (guardado) {
+    // Reinsere para virar o mais recente (o Map mantém a ordem de inserção).
+    cacheEmbedding.delete(chave);
+    cacheEmbedding.set(chave, guardado);
+    return guardado;
+  }
   const [vetor] = await embeddings([pergunta], MODELOS.embedding, rastro, "embedding-consulta");
+  cacheEmbedding.set(chave, vetor);
+  if (cacheEmbedding.size > CACHE_MAXIMO) cacheEmbedding.delete(cacheEmbedding.keys().next().value!);
   return vetor;
 }
 
@@ -83,10 +99,12 @@ export function buscarHibrida(pergunta: string, vetor: number[], quantidade: num
 
 /** Roda os três modos com um único embedding, para comparar lado a lado. */
 export async function buscarNosTresModos(pergunta: string, quantidade: number, rastro: Rastro, colecao: Colecao | null = null) {
+  // A busca lexical não precisa do vetor: começa junto com o embedding, em vez de esperar por ele.
+  const lexicalPronta = buscarLexical(pergunta, quantidade, colecao);
   const vetor = await embeddingDaPergunta(pergunta, rastro);
   const [vetorial, lexical, hibrida] = await Promise.all([
     buscarVetorial(vetor, quantidade, colecao),
-    buscarLexical(pergunta, quantidade, colecao),
+    lexicalPronta,
     buscarHibrida(pergunta, vetor, quantidade, colecao),
   ]);
   return { vetorial, lexical, hibrida } satisfies Record<ModoBusca, Trecho[]>;

@@ -26,12 +26,19 @@ interface Gasto {
 export function Trilho() {
   const caminho = usePathname();
   const [gasto, setGasto] = useState<Gasto | null>(null);
+  // Teto inválido ou gasto ilegível bloqueiam as chamadas: o trilho diz o motivo, em vez
+  // de ficar em "Lendo o gasto do dia…" para sempre.
+  const [erroGasto, setErroGasto] = useState<string | null>(null);
 
   const atualizar = useCallback(() => {
     fetch("/api/observabilidade/gasto", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setGasto)
-      .catch(() => setGasto(null));
+      .then(async (r) => {
+        const json = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(json.erro ?? `O gasto do dia não pôde ser lido (status ${r.status}).`);
+        setGasto(json);
+        setErroGasto(null);
+      })
+      .catch((e) => setErroGasto(e instanceof Error ? e.message : String(e)));
   }, []);
 
   useEffect(() => {
@@ -82,7 +89,9 @@ export function Trilho() {
 
       <div data-some className="hidden px-5 py-5 md:block">
         <div className="rounded-2xl bg-white/60 px-4 py-3">
-          {gasto?.configurado ? (
+          {erroGasto ? (
+            <p className="text-[13px] text-alarme">{erroGasto}</p>
+          ) : gasto?.configurado ? (
             <>
               <div className="flex items-baseline justify-between text-[13px]">
                 <span className="text-suave">Gasto hoje</span>

@@ -1,5 +1,6 @@
 import "server-only";
 import type { ReasoningEffort } from "openai/resources/shared";
+import { ErroConfiguracao } from "./erros";
 
 // Cada papel tem um modelo, e todos podem ser trocados por variável de ambiente.
 // Padrão: família GPT-6, a atual da OpenAI (a gpt-4.1-nano foi aposentada em 2026,
@@ -119,5 +120,27 @@ export type PapelChamada = keyof typeof PARAMETROS;
 /** Precisa bater com a coluna vector(1536) do Supabase. */
 export const DIMENSAO_EMBEDDING = 1536;
 
-/** Acima deste gasto no dia, o cliente recusa novas chamadas antes de chegar à OpenAI. */
-export const TETO_DIARIO_USD = Number(process.env.TETO_DIARIO_USD ?? "2");
+function lerTeto(bruto: string | undefined): number {
+  const texto = bruto?.trim();
+  if (!texto) return 2;
+  const valor = Number(texto);
+  return Number.isFinite(valor) && valor >= 0 ? valor : Number.NaN;
+}
+
+/** Lido uma vez, ao subir o servidor. Vazio usa o padrão, US$ 2. */
+const TETO_LIDO = lerTeto(process.env.TETO_DIARIO_USD);
+
+/**
+ * Acima deste gasto no dia, o cliente recusa novas chamadas antes de chegar à OpenAI.
+ * É uma função, não um número, por causa do valor inválido: Number("2,5") é NaN, e toda
+ * comparação com NaN é falsa. Com um número direto, `gasto >= NaN` nunca bloquearia e o
+ * teto desligaria em silêncio. Assim, quem usa o teto recebe o erro e a chamada não sai.
+ */
+export function tetoDiarioUsd(): number {
+  if (Number.isNaN(TETO_LIDO)) {
+    throw new ErroConfiguracao(
+      `TETO_DIARIO_USD="${process.env.TETO_DIARIO_USD}" não é um valor válido. Use um número com ponto (2.5) no .env.local e reinicie o servidor. Sem um teto válido, nenhuma chamada sai para a OpenAI.`,
+    );
+  }
+  return TETO_LIDO;
+}

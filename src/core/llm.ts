@@ -6,7 +6,7 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
 } from "openai/resources/chat/completions";
 import type { ReasoningEffort } from "openai/resources/shared";
-import { TETO_DIARIO_USD } from "./config";
+import { tetoDiarioUsd } from "./config";
 import { ErroConfiguracao, ErroTetoGasto } from "./erros";
 import { custoUsd, precoConhecido } from "./precos";
 import { aceitaTemperatura, esforcoPara } from "./regras-modelo";
@@ -42,7 +42,12 @@ async function lerGastoDoBanco(): Promise<number> {
   const { data, error } = await obterSupabase().rpc("gasto_do_dia");
   if (error) {
     console.warn(JSON.stringify({ evento: "teto.leitura_falhou", erro: error.message }));
-    return gastoEmCache?.valor ?? 0;
+    // Com um valor recente guardado, segue com ele. Sem nenhum, o teto falha fechado:
+    // antes valia 0, e o limite deixava tudo passar justamente quando não sabia o gasto.
+    if (gastoEmCache) return gastoEmCache.valor;
+    throw new ErroConfiguracao(
+      `Não deu para ler o gasto do dia no Supabase (${error.message}). Sem esse número o teto não tem como ser garantido, então nenhuma chamada sai para a OpenAI.`,
+    );
   }
   gastoEmCache = { valor: Number(data ?? 0), lidoEm: Date.now() };
   return gastoEmCache.valor;
@@ -60,16 +65,18 @@ async function verificarTeto() {
   // Com um valor já guardado, o teto usa ele na hora e atualiza em segundo plano se estiver
   // velho: a consulta (~150 ms) sai do caminho da resposta. Para um teto diário, alguns
   // segundos de defasagem não mudam nada; cada chamada também soma seu custo ao valor guardado.
+  const teto = tetoDiarioUsd();
   let gasto: number;
   if (gastoEmCache) {
     gasto = gastoEmCache.valor;
-    if (Date.now() - gastoEmCache.lidoEm >= 10_000) void gastoDeHoje();
+    // Com valor guardado a leitura não lança (devolve o guardado); o catch só evita rejeição solta.
+    if (Date.now() - gastoEmCache.lidoEm >= 10_000) void gastoDeHoje().catch(() => undefined);
   } else {
     gasto = await gastoDeHoje();
   }
-  if (gasto >= TETO_DIARIO_USD) {
+  if (gasto >= teto) {
     throw new ErroTetoGasto(
-      `Teto diário de US$ ${TETO_DIARIO_USD.toFixed(2)} atingido (gasto hoje: US$ ${gasto.toFixed(4)}). Aumente TETO_DIARIO_USD no .env.local se quiser continuar.`,
+      `Teto diário de US$ ${teto.toFixed(2)} atingido (gasto hoje: US$ ${gasto.toFixed(4)}). Aumente TETO_DIARIO_USD no .env.local se quiser continuar.`,
     );
   }
 }

@@ -1,5 +1,5 @@
 import "server-only";
-import { TETO_DIARIO_USD } from "@/core/config";
+import { tetoDiarioUsd } from "@/core/config";
 import { gastoDeHoje } from "@/core/llm";
 import { obterSupabase, supabaseConfigurado } from "@/core/supabase";
 import { listarExecucoes } from "@/modules/avaliacao/execucoes";
@@ -66,7 +66,7 @@ export async function montarPainel(): Promise<PainelObservabilidade> {
       configurado: false,
       periodoDias: PERIODO_DIAS,
       amostraLimitada: false,
-      teto: { gastoHojeUsd: 0, tetoUsd: TETO_DIARIO_USD },
+      teto: { gastoHojeUsd: 0, tetoUsd: tetoDiarioUsd() },
       totais: { ...vazio, tokensEntrada: 0, tokensSaida: 0 },
       porModelo: [],
       porModulo: [],
@@ -124,7 +124,7 @@ export async function montarPainel(): Promise<PainelObservabilidade> {
     configurado: true,
     periodoDias: PERIODO_DIAS,
     amostraLimitada: linhas.length >= LIMITE_LINHAS,
-    teto: { gastoHojeUsd, tetoUsd: TETO_DIARIO_USD },
+    teto: { gastoHojeUsd, tetoUsd: tetoDiarioUsd() },
     totais: {
       ...distribuir(linhas),
       tokensEntrada: linhas.reduce((s, l) => s + l.tokens_entrada, 0),

@@ -1,5 +1,5 @@
 import "server-only";
-import { MODELOS, RACIOCINIO } from "@/core/config";
+import { PARAMETROS } from "@/core/config";
 import { chatJson } from "@/core/llm";
 import type { Rastro } from "@/core/tipos";
 import type { Trecho, TrechoReranqueado } from "./tipos";
@@ -32,7 +32,7 @@ export async function reranquear(
 
   const saida = await chatJson<SaidaRerank>(
     {
-      modelo: MODELOS.rerank,
+      modelo: PARAMETROS.rerank.modelo,
       sistema:
         "Você ordena trechos de documentação técnica por utilidade para responder a uma pergunta. " +
         "Dê a cada trecho uma nota de 0 a 10: 10 = contém a resposta direta; 5 = assunto relacionado sem a resposta; 0 = irrelevante. " +
@@ -55,8 +55,9 @@ export async function reranquear(
           },
         },
       },
-      temperatura: 0,
-      raciocinio: RACIOCINIO.rapido,
+      temperatura: PARAMETROS.rerank.temperatura,
+      raciocinio: PARAMETROS.rerank.raciocinio,
+      maxTokens: PARAMETROS.rerank.maxTokens,
     },
     rastro,
     "rerank",

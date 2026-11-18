@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { BarrasHorizontais, ColunasPorHora } from "@/components/graficos";
+import { TabelaParametros } from "@/components/tabela-parametros";
 import { Aviso, Botao, Cabecalho, FaixaIndicadores, Indicador, Lampada, Medidor, Nota, Painel, Secao } from "@/components/ui";
 import { chamarApi } from "@/lib/api";
 import { fmtDataHora, fmtDecimal, fmtHora, fmtInteiro, fmtMs, fmtUsd } from "@/lib/formato";
@@ -84,6 +85,14 @@ export default function PaginaObservabilidade() {
               <Indicador rotulo="Latência p50" termo="percentis" valor={fmtMs(t.p50)} />
               <Indicador rotulo="Latência p95" termo="percentis" valor={fmtMs(t.p95)} />
             </FaixaIndicadores>
+          </Secao>
+
+          <Secao
+            titulo="Parâmetros dos modelos"
+            termo="parametros"
+            descricao="O que cada chamada envia à OpenAI. Temperatura riscada: o modelo raciocina e só aceita o padrão (1), verificado com a API."
+          >
+            <TabelaParametros />
           </Secao>
 
           <div className="grid gap-x-10 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">

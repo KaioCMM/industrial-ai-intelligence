@@ -1,5 +1,5 @@
 import "server-only";
-import { MODELOS, RACIOCINIO } from "@/core/config";
+import { PARAMETROS } from "@/core/config";
 import { chatJson } from "@/core/llm";
 import { obterSupabase, supabaseConfigurado } from "@/core/supabase";
 import type { Rastro } from "@/core/tipos";
@@ -12,7 +12,8 @@ import type { Julgamento } from "./tipos";
 // medir uma coisa definida e duas execuções ficam comparáveis.
 // A justificativa vem ANTES das notas no schema: o modelo escreve o raciocínio
 // e só depois decide o número, em vez de inventar uma explicação para um número já dado.
-// Temperatura 0 (nos modelos que aceitam) para a mesma resposta receber a mesma nota.
+// Temperatura 0 só vale nos modelos que aceitam: o juiz padrão (gpt-6.1-sol) raciocina e
+// roda com a temperatura padrão, 1. Nele, a consistência vem da rubrica e do schema.
 // Raciocínio "low": o juiz compara afirmação por afirmação com o contexto, e um pouco de raciocínio ajuda nisso.
 
 const RUBRICA = `Avalie a RESPOSTA de um assistente de gestão de projetos de capital segundo três critérios, cada um de 1 a 5.
@@ -35,7 +36,7 @@ export async function julgar(
 ): Promise<Julgamento> {
   const saida = await chatJson<Omit<Julgamento, "nota" | "modeloJuiz">>(
     {
-      modelo: MODELOS.juiz,
+      modelo: PARAMETROS.juiz.modelo,
       sistema: RUBRICA,
       usuario: [
         `PERGUNTA:\n${entrada.pergunta}`,
@@ -55,15 +56,15 @@ export async function julgar(
           completude: { type: "integer", enum: [1, 2, 3, 4, 5] },
         },
       },
-      temperatura: 0,
-      raciocinio: RACIOCINIO.analise,
-      maxTokens: 2500,
+      temperatura: PARAMETROS.juiz.temperatura,
+      raciocinio: PARAMETROS.juiz.raciocinio,
+      maxTokens: PARAMETROS.juiz.maxTokens,
     },
     rastro,
     "juiz",
   );
   const nota = Math.round(((saida.fidelidade + saida.relevancia + saida.completude) / 3) * 100) / 100;
-  return { ...saida, nota, modeloJuiz: MODELOS.juiz };
+  return { ...saida, nota, modeloJuiz: PARAMETROS.juiz.modelo };
 }
 
 export async function salvarJulgamento(dados: {

@@ -131,6 +131,18 @@ export const GLOSSARIO = {
       "Modelos de raciocínio \"pensam\" antes de responder, e esse pensamento gasta tokens cobrados como saída. Mais raciocínio ajuda em análise, mas deixa tarefas simples mais lentas e caras.",
     aqui: "Cada chamada define o próprio nível: classificar, reordenar e responder com o contexto pronto usam \"none\"; o juiz e as perguntas complexas usam \"low\".",
   },
+  temperatura: {
+    titulo: "Temperatura",
+    oQueE:
+      "Controla o quanto o modelo varia na escolha das palavras. Perto de 0, a mesma entrada tende a gerar a mesma saída; mais alta, a resposta varia mais. Em tarefa de rótulo ou nota se usa 0; em texto, um pouco acima.",
+    aqui: "Testado com a API: nos GPT-6 a temperatura só vale com raciocínio \"none\". Com raciocínio, o modelo só aceita o padrão (1), e a consistência do juiz vem da rubrica e da saída estruturada.",
+  },
+  parametros: {
+    titulo: "Parâmetros por chamada",
+    oQueE:
+      "Cada chamada ao modelo tem seus próprios ajustes: qual modelo, temperatura, raciocínio, limite de tokens e formato da saída. Ajustar por tarefa, e não um valor para tudo, é o que equilibra qualidade, custo e tempo.",
+    aqui: "Os valores vêm de um registro único em src/core/config.ts, lido pelos módulos e por esta tabela: a tela nunca fica diferente do código.",
+  },
 
   // ---------- function calling ----------
   "function-calling": {

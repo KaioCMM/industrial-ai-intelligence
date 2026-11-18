@@ -1,5 +1,5 @@
 import "server-only";
-import { MODELOS, RACIOCINIO } from "@/core/config";
+import { PARAMETROS } from "@/core/config";
 import { chat } from "@/core/llm";
 import type { Rastro } from "@/core/tipos";
 import { buscar, buscarNosTresModos } from "./busca";
@@ -21,14 +21,14 @@ export async function gerarResposta(pergunta: string, contexto: Trecho[], rastro
     .join("\n\n");
   const resposta = await chat(
     {
-      model: MODELOS.medio,
+      model: PARAMETROS.respostaRag.modelo,
       messages: [
         { role: "system", content: SISTEMA_RESPOSTA },
         { role: "user", content: `Trechos:\n${trechos}\n\nPergunta: ${pergunta}` },
       ],
-      temperatura: 0.2,
-      raciocinio: RACIOCINIO.rapido,
-      max_completion_tokens: 1000,
+      temperatura: PARAMETROS.respostaRag.temperatura,
+      raciocinio: PARAMETROS.respostaRag.raciocinio,
+      max_completion_tokens: PARAMETROS.respostaRag.maxTokens,
     },
     rastro,
     "resposta-rag",

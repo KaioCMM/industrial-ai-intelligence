@@ -8,6 +8,7 @@ import type { ReasoningEffort } from "openai/resources/shared";
 import { TETO_DIARIO_USD } from "./config";
 import { ErroConfiguracao, ErroTetoGasto } from "./erros";
 import { custoUsd, precoConhecido } from "./precos";
+import { aceitaTemperatura, esforcoPara } from "./regras-modelo";
 import { obterSupabase, supabaseConfigurado } from "./supabase";
 import type { ChamadaLLM, Modulo, Rastro } from "./tipos";
 
@@ -85,17 +86,8 @@ async function registrar(rastro: Rastro, chamada: ChamadaLLM) {
   if (error) console.warn(JSON.stringify({ evento: "telemetria.falhou", erro: error.message }));
 }
 
-// Modelos de raciocínio (GPT-5, GPT-6, série o) recusam temperature e aceitam reasoning_effort;
-// os outros (gpt-4.1, gpt-4o) é o contrário. O cliente manda só o que o modelo aceita,
-// para trocar de modelo pelo .env sem mexer em nenhum módulo.
-const ehModeloDeRaciocinio = (modelo: string) => /^(gpt-5|gpt-6|o\d)/.test(modelo);
-// Modelos que não aceitam raciocínio "none": o mínimo deles é "low".
-const semRaciocinioZero = (modelo: string) => /^gpt-6(\.\d+)?-(sol|astra)/.test(modelo);
-
-function esforcoPara(modelo: string, pedido: ReasoningEffort | undefined): ReasoningEffort | undefined {
-  if (!ehModeloDeRaciocinio(modelo) || !pedido) return undefined;
-  return pedido === "none" && semRaciocinioZero(modelo) ? "low" : pedido;
-}
+// O cliente manda só os parâmetros que o modelo aceita (regras em regras-modelo.ts,
+// verificadas com a API), para trocar de modelo pelo .env sem mexer em nenhum módulo.
 
 // ---------- chamadas ----------
 
@@ -114,7 +106,7 @@ export async function chat(params: ParametrosChat, rastro: Rastro, operacao: str
   try {
     const resposta = await cliente.chat.completions.create({
       ...resto,
-      ...(temperatura !== undefined && !ehModeloDeRaciocinio(params.model) ? { temperature: temperatura } : {}),
+      ...(temperatura !== undefined && aceitaTemperatura(params.model, esforco) ? { temperature: temperatura } : {}),
       ...(esforco ? { reasoning_effort: esforco } : {}),
       stream: false,
     });

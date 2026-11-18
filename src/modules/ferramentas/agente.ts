@@ -1,6 +1,6 @@
 import "server-only";
 import type { ChatCompletionMessageParam, ChatCompletionToolMessageParam } from "openai/resources/chat/completions";
-import { MODELOS, RACIOCINIO } from "@/core/config";
+import { PARAMETROS } from "@/core/config";
 import { chat } from "@/core/llm";
 import type { Rastro } from "@/core/tipos";
 import { buscar } from "@/modules/rag/busca";
@@ -87,14 +87,14 @@ export async function executarAgente(pergunta: string, rastro: Rastro) {
     const ultimaRodada = rodada === MAX_RODADAS;
     const resposta = await chat(
       {
-        model: MODELOS.medio,
+        model: PARAMETROS.agente.modelo,
         messages: mensagens,
         tools: FERRAMENTAS,
         // Na última rodada o modelo é obrigado a responder com o que já tem.
         tool_choice: ultimaRodada ? "none" : "auto",
-        temperatura: 0.1,
-        raciocinio: RACIOCINIO.rapido,
-        max_completion_tokens: 1200,
+        temperatura: PARAMETROS.agente.temperatura,
+        raciocinio: PARAMETROS.agente.raciocinio,
+        max_completion_tokens: PARAMETROS.agente.maxTokens,
       },
       rastro,
       "agente-rodada",

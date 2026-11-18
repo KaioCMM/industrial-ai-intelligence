@@ -1,5 +1,5 @@
 import "server-only";
-import { MODELOS, RACIOCINIO } from "@/core/config";
+import { MODELOS, PARAMETROS } from "@/core/config";
 import { chat, chatJson } from "@/core/llm";
 import { custoUsd } from "@/core/precos";
 import type { Rastro } from "@/core/tipos";
@@ -15,16 +15,24 @@ import type { Complexidade, DecisaoRota } from "./tipos";
 // paráfrases ("faça um plano" vs. "qual o plano") e não explica a decisão.
 // O classificador devolve o motivo, que vai para o painel: dá para auditar.
 
+// Cada faixa aponta para os parâmetros da resposta (modelo, temperatura, raciocínio, limite).
+const PARAMETROS_DA_ROTA = {
+  simples: PARAMETROS.roteadaSimples,
+  moderada: PARAMETROS.roteadaModerada,
+  complexa: PARAMETROS.roteadaComplexa,
+} as const;
+
 export const MAPA_ROTAS: Record<Complexidade, string> = {
-  simples: MODELOS.leve,
-  moderada: MODELOS.medio,
-  complexa: MODELOS.forte,
+  simples: PARAMETROS.roteadaSimples.modelo,
+  moderada: PARAMETROS.roteadaModerada.modelo,
+  complexa: PARAMETROS.roteadaComplexa.modelo,
 };
 
 export async function classificar(pergunta: string, rastro: Rastro): Promise<DecisaoRota> {
+  const p = PARAMETROS.classificador;
   return chatJson<DecisaoRota>(
     {
-      modelo: MODELOS.leve,
+      modelo: p.modelo,
       sistema:
         "Classifique a complexidade de uma pergunta sobre gestão de projetos de capital, engenharia ou obra industrial, para escolher o modelo que vai respondê-la.\n" +
         "simples: fato direto, definição curta, sigla, conta de uma etapa, resposta de uma ou duas frases.\n" +
@@ -42,9 +50,9 @@ export async function classificar(pergunta: string, rastro: Rastro): Promise<Dec
           motivo: { type: "string" },
         },
       },
-      temperatura: 0,
-      raciocinio: RACIOCINIO.rapido,
-      maxTokens: 200,
+      temperatura: p.temperatura,
+      raciocinio: p.raciocinio,
+      maxTokens: p.maxTokens,
     },
     rastro,
     "classificar-rota",
@@ -53,7 +61,8 @@ export async function classificar(pergunta: string, rastro: Rastro): Promise<Dec
 
 export async function rotearEResponder(pergunta: string, rastro: Rastro) {
   const decisao = await classificar(pergunta, rastro);
-  const modelo = MAPA_ROTAS[decisao.complexidade];
+  const p = PARAMETROS_DA_ROTA[decisao.complexidade];
+  const modelo = p.modelo;
 
   const resposta = await chat(
     {
@@ -66,10 +75,10 @@ export async function rotearEResponder(pergunta: string, rastro: Rastro) {
         },
         { role: "user", content: pergunta },
       ],
-      temperatura: 0.3,
       // Só a pergunta complexa ganha raciocínio, e o limite de tokens cresce para caber ele.
-      raciocinio: decisao.complexidade === "complexa" ? RACIOCINIO.analise : RACIOCINIO.rapido,
-      max_completion_tokens: decisao.complexidade === "complexa" ? 4000 : 1200,
+      temperatura: p.temperatura,
+      raciocinio: p.raciocinio,
+      max_completion_tokens: p.maxTokens,
     },
     rastro,
     "resposta-roteada",

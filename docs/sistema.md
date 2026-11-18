@@ -117,18 +117,19 @@ dados/normas/           texto das NRs e manifesto com URL e data
 Exemplo: *"Por que o Projeto Linha 3 está atrasado?"* na tela Busca e RAG, com
 busca híbrida e reranking.
 
-| Passo | O que acontece | Onde | Tempo típico (p50) |
+| Passo | O que acontece | Onde | Tempo típico |
 |---|---|---|---|
-| 1 | A rota valida a pergunta e cria um rastro com `trace_id` | `api/rag/route.ts` | — |
-| 2 | A pergunta vira um vetor de 1.536 números | `rag/busca.ts` → `text-embedding-3-small` | 0,52 s |
-| 3 | O Postgres roda a busca vetorial e a lexical e funde as duas por RRF, devolvendo 8 candidatos | função `buscar_hibrida` | incluído acima |
-| 4 | Um modelo leve dá nota de 0 a 10 aos 8 candidatos; os 4 melhores viram o contexto | `rag/rerank.ts` → `gpt-6-luna` | 1,79 s |
-| 5 | O modelo responde só com os 4 trechos, citando [n] e o item da NR | `rag/pipeline.ts` → `gpt-6.1-terra` | 2,03 s |
-| 6 | (Opcional) O juiz dá nota à resposta | `avaliacao/juiz.ts` → `gpt-6.1-sol` | 2,80 s |
-| 7 | Cada chamada grava tokens, custo e latência no Supabase | `core/llm.ts` | — |
+| 1 | A rota valida a pergunta e abre a resposta em fluxo, com um `trace_id` | `api/rag/route.ts` | — |
+| 2 | A busca lexical começa e, ao mesmo tempo, a pergunta vira um vetor de 1.536 números (pergunta repetida usa o vetor em cache) | `rag/busca.ts` → `text-embedding-3-small` | 0,4 a 0,9 s (0 em cache) |
+| 3 | O Postgres roda a busca vetorial e a híbrida (RRF) e devolve 12 candidatos | funções `buscar_*` | ~0,12 s |
+| 4 | Um modelo leve dá nota de 0 a 10 aos 12 candidatos, lendo 700 caracteres de cada; os 4 melhores viram o contexto. **As buscas aparecem na tela aqui** | `rag/rerank.ts` → `gpt-6-luna` | 1,3 a 2,1 s |
+| 5 | O modelo responde só com os 4 trechos, citando [n] e o item da NR, **palavra a palavra** | `rag/pipeline.ts` → `gpt-6.1-terra` | primeira palavra em ~1,1 s |
+| 6 | (Opcional) O juiz dá nota, **depois** que a resposta já está na tela | `api/rag/julgar` → `gpt-6.1-sol` | ~3 s, fora do caminho |
+| 7 | Cada chamada grava tokens, custo e latência no Supabase, depois do envio | `core/llm.ts` (`after()`) | fora do caminho |
 
-Sem o juiz, uma pergunta leva por volta de **5 a 8 segundos** e custa cerca de
-**US$ 0,002**.
+Medido em 16/11/2026: as buscas aparecem em **2 a 3,5 s**, a primeira palavra da
+resposta em **3 a 4,7 s** e a resposta completa em **4,4 a 5,7 s** (respostas longas,
+até ~8 s). Custo de cerca de **US$ 0,002** por pergunta.
 
 ---
 
@@ -156,10 +157,17 @@ fusão por RRF, reranking com LLM e resposta com citação.
   duas buscas estão em escalas diferentes.
 - **Coleções:** cada trecho é `projeto`, `normas` ou `conceitos`, e a busca aceita
   filtro por coleção.
-- **Reranking:** 8 candidatos, uma única chamada ao modelo leve, saída estruturada
-  com nota de 0 a 10 por trecho; os 4 melhores viram o contexto.
-- **Resposta:** o modelo recebe os trechos numerados e é instruído a citar cada
-  afirmação e a dizer que a documentação não cobre o assunto quando for o caso.
+- **Reranking:** 12 candidatos numa única chamada ao modelo leve. Cada trecho vai
+  cortado em 700 caracteres (o começo basta para julgar se responde), e a saída é só
+  a lista de notas na ordem dos trechos (`[7, 2, 9, …]`): 35 tokens de saída, contra
+  109 do formato anterior com id e nota. Os 4 melhores viram o contexto.
+- **Resposta em fluxo:** o modelo recebe os trechos numerados, com fonte e título, e é
+  instruído a citar cada afirmação e a dizer que a documentação não cobre o assunto
+  quando for o caso. A resposta é enviada à tela palavra a palavra (NDJSON).
+- **Mapa dos embeddings:** os 843 trechos projetados em 2D por PCA (iteração de
+  potência, no servidor, sem biblioteca); a pergunta é projetada nos mesmos eixos, em
+  paralelo com o reranking, e ligada aos trechos encontrados. Os dois eixos explicam
+  19% da variação: o mapa mostra grupos, não a distância exata.
 
 ### 4.2 Roteamento de modelos (`src/modules/roteamento`)
 
@@ -236,8 +244,14 @@ importa o SDK direto. Ali vivem:
   Nos modelos de raciocínio, os tokens de raciocínio vêm somados na saída e
   entram no custo.
 - **Teto de gasto:** antes de cada chamada, soma o gasto do dia no Supabase
-  (com cache de 10 s); acima do teto, recusa antes de sair para a OpenAI.
+  (com cache de 10 s); acima do teto, recusa antes de sair para a OpenAI. O teto
+  falha fechado: um `TETO_DIARIO_USD` inválido ou um gasto do dia que não pôde ser
+  lido bloqueiam a chamada, em vez de desligar o limite.
 - **Timeout de 45 s e 2 novas tentativas** em erro temporário (429, 5xx, rede).
+- **Cancelamento:** se a pessoa sai da tela ou fecha a aba no meio da resposta do RAG,
+  o cancelamento chega à OpenAI e a geração para. A linha da telemetria fica como erro
+  ("cancelada") e com custo 0: o uso de tokens só vem no último pedaço do fluxo, então
+  os tokens gerados até ali, que a OpenAI cobra, não aparecem.
 - **Parâmetros por tipo de modelo:** modelos de raciocínio recebem
   `reasoning_effort` e não recebem `temperature`; os outros, o contrário. Modelos
   que não aceitam raciocínio "none" sobem para "low". Assim dá para trocar o modelo
@@ -328,28 +342,47 @@ roda uma vez, não quando alguém pergunta.
   em azul quando passa do dobro da mediana.
 - **Amostra pequena:** com 11 a 13 chamadas por etapa, o p95 é praticamente a
   chamada mais lenta. Só passa a ter valor estatístico com centenas de chamadas.
-- **Ponta a ponta:** uma pergunta com reranking leva de 5 a 8 s. É usável para
-  consulta técnica, mas não é rápido. O que mais melhoraria a sensação de velocidade
-  é **streaming** (a resposta começar a aparecer em cerca de 1 s), não baixar estes números.
+- **Ponta a ponta:** a tabela acima é da primeira versão. Depois das otimizações da
+  seção seguinte, as buscas aparecem em 2 a 3,5 s e a primeira palavra em 3 a 4,7 s.
 
-### Qualidade (avaliação de 16/11/2026: busca híbrida com reranking)
+### Otimização de latência (16/11/2026)
 
-| Critério | Média (11 casos) |
+O que mudou, do maior ganho para o menor, e por que não custou qualidade:
+
+| Mudança | Efeito |
 |---|---|
-| Fidelidade | 5,00 |
-| Relevância | 5,00 |
-| Completude | 4,73 |
-| **Nota geral** | **4,91 de 5** |
+| Streaming da resposta | A tela deixou de ficar parada até o fim: buscas e primeira palavra aparecem antes da resposta completa |
+| Juiz fora do caminho | A resposta não espera mais ~3 s pela nota |
+| Saída do reranker como lista de notas | 109 → 35 tokens de saída; reranking de ~2,0 s para ~1,5 s |
+| Telemetria e teto fora do caminho | Gravação depois do envio (`after()`) e teto com o último valor conhecido: ~250 ms a menos |
+| Cache do embedding da pergunta | Pergunta repetida economiza 0,4 a 0,9 s |
+| Busca lexical em paralelo com o embedding | Ganho pequeno, sem custo |
+| 12 candidatos, cortados em 700 caracteres | Mesmo volume de tokens de 8 inteiros, e mais chance de o documento certo entrar |
 
-- **Fidelidade 5,0 em todos os casos:** nenhuma resposta inventou informação.
+O que sobra é quase todo tempo de resposta da própria OpenAI: embedding, reranking e
+a primeira palavra da geração.
+
+### Qualidade: duas rodadas da avaliação (busca híbrida com reranking)
+
+| Critério | Antes das otimizações | Depois |
+|---|---|---|
+| Fidelidade | 5,00 | 4,82 |
+| Relevância | 5,00 | 5,00 |
+| Completude | 4,73 | **5,00** |
+| **Nota geral** | **4,91** | **4,94** |
+| Tempo médio por caso (com o juiz) | 8,8 s | **6,9 s** |
+| Custo da rodada | US$ 0,055 | US$ 0,054 |
+
+- **Completude 5,0 em todos os casos:** o caso "causas do atraso", que tinha
+  completude 2 por falha de recuperação, passou a trazer o relatório mensal e as quatro
+  causas, graças aos 12 candidatos.
+- **A queda de fidelidade é da medição, não da resposta:** nesse mesmo caso, o juiz deu
+  fidelidade 3 porque a resposta citou o "relatório mensal", e o juiz recebia só o
+  conteúdo dos trechos, sem o título que o modelo via. O contexto do juiz passou a ser
+  montado pela mesma função que o do modelo (`rag/contexto.ts`).
 - **Pergunta fora da base** (cotação do minério de ferro): o sistema disse que não
   tem a informação.
 - **NR-35:** a resposta citou o item 35.2.1 vigente.
-- **O único caso fraco** ("Quais as causas do atraso?", completude 2) é falha de
-  **recuperação**, não do modelo. O trecho do relatório mensal com as quatro causas
-  não entrou entre os 4 do contexto; a resposta não inventou nada e disse que os
-  trechos recebidos não explicavam o resto.
-- **Custo e tempo da rodada:** US$ 0,055 e, em média, 8,8 s por caso, com o juiz.
 
 ---
 
@@ -379,7 +412,9 @@ roda uma vez, não quando alguém pergunta.
 | Busca híbrida com RRF | A lexical acha códigos exatos e a vetorial acha paráfrases; RRF funde sem misturar escalas | Só busca vetorial |
 | HNSW | Não exige dados para treinar o índice e tem recall melhor com poucas linhas | IVFFlat |
 | Divisão de NR por item | O item é o que se cita; cortar por tamanho fixo partiria a citação | Trechos de tamanho fixo |
-| Reranking com LLM leve | Sem mais um fornecedor nem mais uma chave; uma chamada avalia os 8 candidatos | Cohere ou cross-encoder próprio |
+| Reranking com LLM leve | Sem mais um fornecedor nem mais uma chave; uma chamada avalia os 12 candidatos | Cohere ou cross-encoder próprio |
+| Streaming em NDJSON | Uma linha JSON por evento, lida com `fetch` no navegador; simples de depurar | WebSocket ou SSE com biblioteca |
+| Temperatura conforme o modelo aceita | Verificado com a API: nos GPT-6, só com raciocínio "none" | Supor que nenhum modelo de raciocínio aceita |
 | Roteamento por classificador | Entende paráfrase e explica a decisão | Regra por palavras-chave |
 | Contas em código | Modelo de linguagem erra aritmética | Deixar o modelo calcular SPI e EAC |
 | Juiz com rubrica, outro modelo e mais forte | Notas comparáveis entre execuções, sem o juiz favorecer o próprio estilo | Nota livre de 1 a 5 |
@@ -394,12 +429,13 @@ roda uma vez, não quando alguém pergunta.
 
 **Limitações**
 
-- **Recuperação perde documento em pergunta de síntese:** o caso "causas do atraso"
-  mostra que 8 candidatos podem não bastar quando 820 trechos de NR competem com 19
-  do projeto, ou quando a pergunta usa palavras diferentes do documento ("atraso"
-  contra "desvio de prazo").
-- **Sem streaming:** a resposta aparece inteira no fim.
-- **Amostra pequena:** os percentis ainda dizem pouco.
+- **Recuperação depende das palavras da pergunta:** a pergunta pode usar termos
+  diferentes do documento ("atraso" contra "desvio de prazo"). Subir para 12
+  candidatos resolveu o caso medido, mas não é garantia.
+- **Amostra pequena:** os percentis e as duas rodadas de avaliação ainda dizem pouco
+  estatisticamente.
+- **O reranking continua no caminho crítico** (1,3 a 2,1 s): tirá-lo economizaria esse
+  tempo, ao custo de qualidade a ser medido pela avaliação.
 - **Dados simulados em memória:** pedidos de mudança registrados pelo agente somem
   quando o servidor reinicia.
 - **Sem login:** é um sistema de apresentação.
@@ -408,14 +444,13 @@ roda uma vez, não quando alguém pergunta.
 
 **Próximos passos, em ordem de impacto**
 
-1. **Streaming da resposta**, para a primeira palavra aparecer em cerca de 1 s.
-2. **Mais candidatos antes do reranking** (8 → 15) e nova rodada de avaliação para
-   medir se a completude melhora sem piorar os outros casos.
-3. **Reescrita da pergunta** (sinônimos do domínio, como atraso → desvio de prazo)
+1. **Nova rodada de avaliação** com o contexto do juiz corrigido, e uma rodada sem
+   reranking, para medir quanto de qualidade custaria economizar 1,5 s.
+2. **Reescrita da pergunta** (sinônimos do domínio, como atraso → desvio de prazo)
    antes da busca.
-4. **Reranking mais rápido:** trechos menores ou menos candidatos para o modelo leve.
-5. **View materializada** para a telemetria, quando passar de 1.000 chamadas.
-6. **Cache de embeddings** de perguntas repetidas.
+3. **Fine-tuning do classificador de roteamento** (destilação), comparado por número
+   com o classificador atual.
+4. **View materializada** para a telemetria, quando passar de 1.000 chamadas.
 
 ---
 
@@ -430,18 +465,22 @@ Cerca de 10 minutos.
    de processo com p50 e p95 de cada etapa.
 3. **Busca e RAG (3 min).**
    - Perguntar *"PM-022"*: só a lexical e a híbrida acham o código exato.
-   - Perguntar *"A partir de que altura a NR-35 se aplica?"* com o filtro **NRs**: a
-     resposta cita o item 35.2.1.
-   - Ligar o juiz e mostrar a nota e a justificativa.
+   - Perguntar *"A partir de que altura a NR-35 se aplica?"* com o filtro **NRs**: as
+     buscas aparecem primeiro e a resposta vem sendo escrita, citando o item 35.2.1.
+   - Descer até o **mapa dos embeddings**: a pergunta cai ao lado do grupo da NR-35,
+     ligada aos trechos que a busca trouxe.
+   - Ligar o juiz: a nota chega depois da resposta, com a justificativa.
 4. **Roteamento (1 min).** Rodar os 6 exemplos e mostrar a economia contra usar só o
    modelo forte.
 5. **Function calling (2 min).** Perguntar *"Se a montagem dos transportadores de
    correia atrasar 45 dias, o que acontece com a partida?"*: o agente lê a folga de
    30 dias e calcula 15 dias de atraso na partida.
-6. **Avaliação (1 min).** Mostrar o histórico: nota 4,91, fidelidade 5,0, e explicar
-   o caso fraco como falha de recuperação.
+6. **Avaliação (1 min).** Mostrar as duas rodadas do histórico: a completude subiu de
+   4,73 para 5,0 com 12 candidatos, e a queda de fidelidade no caso "causas do atraso"
+   era do juiz, que recebia menos contexto que o modelo.
 7. **Observabilidade (1 min).** Custo total, custo por modelo, teto diário, p95 por
-   módulo, e as chamadas com `gpt-4.1-nano` registradas como erro.
+   módulo, a tabela de parâmetros (temperatura riscada onde o modelo raciocina) e as
+   chamadas com `gpt-4.1-nano` registradas como erro.
 
 ---
 
@@ -466,8 +505,9 @@ numa consulta, e a telemetria fica no mesmo banco. A busca está isolada em
 `rag/busca.ts`: trocar de banco não mexe no resto.
 
 **Como você sabe que a resposta está boa?**
-Conjunto de 11 perguntas com gabarito e um juiz com rubrica fixa: nota 4,91 de 5,
-fidelidade 5,0. Há uma pergunta fora da base para medir alucinação.
+Conjunto de 11 perguntas com gabarito e um juiz com rubrica fixa: nota 4,94 de 5,
+completude 5,0. Há uma pergunta fora da base para medir alucinação. A avaliação também
+já pegou um defeito da própria medição: o juiz recebia menos contexto que o modelo.
 
 **O que acontece se a OpenAI cair ou mudar um modelo?**
 O cliente tenta de novo até 2 vezes em erro temporário, com limite de 45 s, e
@@ -475,9 +515,16 @@ registra a falha com a mensagem. Quando o `gpt-4.1-nano` foi aposentado, a falha
 apareceu na telemetria e a troca foi feita por variável de ambiente.
 
 **Quanto custa e quanto demora?**
-Cerca de US$ 0,002 e 5 a 8 s por pergunta no RAG. A avaliação inteira custa
-US$ 0,055. Há um teto diário que bloqueia chamadas acima do limite.
+Cerca de US$ 0,002 por pergunta no RAG; as buscas aparecem em 2 a 3,5 s e a resposta
+começa a ser escrita em 3 a 4,7 s. A avaliação inteira custa US$ 0,054. Há um teto
+diário que bloqueia chamadas acima do limite.
 
-**O que você melhoraria primeiro?**
-Streaming, para a resposta começar em cerca de 1 s; depois, mais candidatos antes do
-reranking, medindo com a avaliação se a completude melhora.
+**Como você baixou a latência sem perder qualidade?**
+Streaming e juiz fora do caminho mudaram o tempo percebido; a saída do reranker virou
+uma lista de notas (109 → 35 tokens); telemetria e teto saíram do caminho da resposta.
+Medi antes e depois com a mesma avaliação: a nota foi de 4,91 para 4,94 e o tempo médio
+por caso de 8,8 s para 6,9 s.
+
+**O que você melhoraria agora?**
+Medir uma rodada sem reranking, para saber quanto de qualidade custaria economizar
+1,5 s, e reescrever a pergunta com sinônimos do domínio antes da busca.

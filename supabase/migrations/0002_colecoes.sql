@@ -14,9 +14,12 @@ drop function if exists public.buscar_vetorial(extensions.vector, int);
 drop function if exists public.buscar_lexical(text, int);
 drop function if exists public.buscar_hibrida(text, extensions.vector, int, double precision, double precision, int);
 
--- Com filtro, o HNSW acha os vizinhos mais próximos e só depois filtra.
--- Com poucos milhares de trechos isso não perde resultado; com milhões, valeria
--- ligar a busca iterativa do pgvector (hnsw.iterative_scan) ou um índice parcial por coleção.
+-- Com filtro, o HNSW acha os vizinhos mais próximos (até hnsw.ef_search, 40 por padrão)
+-- e só depois filtra. O que decide se isso perde resultado é a fração da base que passa
+-- no filtro, não o tamanho da base: a coleção projeto é 2% dos trechos, e 2% de 40 dá ~1.
+-- Hoje, com 843 trechos, o Postgres faz a varredura exata e a busca filtrada vem completa
+-- (conferido em 17/11/2026). Se o índice passar a ser usado, ligar a busca iterativa do
+-- pgvector (hnsw.iterative_scan) ou criar um índice parcial por coleção.
 create or replace function public.buscar_vetorial(
   consulta_embedding extensions.vector(1536),
   quantidade int default 8,

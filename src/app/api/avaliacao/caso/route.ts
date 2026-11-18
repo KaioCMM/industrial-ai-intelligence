@@ -11,7 +11,7 @@ import type { ModoBusca } from "@/modules/rag/tipos";
 export const maxDuration = 60;
 
 // Um caso por requisição: o navegador percorre o conjunto e mostra o progresso
-// caso a caso. Uma requisição única para os 9 casos levaria mais de um minuto
+// caso a caso. Uma requisição única para o conjunto inteiro levaria mais de um minuto
 // sem retorno nenhum na tela, e um erro no meio perderia tudo.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
   // dados nas rotas de API: não há conteúdo do servidor para pré-renderizar ou pré-carregar.
   // Ligados, a validação de "navegação instantânea" do modo de desenvolvimento entrava em
   // laço com a casca do painel (que lê a URL) e recarregava a página sem parar.
+  // Mudar este arquivo reinicia o servidor de desenvolvimento por inteiro: útil quando o
+  // Turbopack fica com um módulo antigo em cache.
   turbopack: {
     rules: {
       "*.css": {

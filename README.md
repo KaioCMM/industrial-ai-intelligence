@@ -71,16 +71,22 @@ Três coleções na mesma tabela, filtráveis na busca:
 
 ## Quanto custa (modelos padrão, preços em `src/core/precos.ts`)
 
-| Ação | Custo aproximado |
+| Ação | Custo |
 |---|---|
 | Indexar só o projeto | menos de US$ 0,001 |
-| Indexar o projeto e as 9 NRs | o script imprime a estimativa; na ordem de US$ 0,01 |
-| Uma pergunta no RAG com reranking | cerca de US$ 0,001 |
+| Indexar o projeto e as 9 NRs (843 trechos) | US$ 0,0052 |
+| Uma pergunta no RAG com reranking | cerca de US$ 0,002 |
+| A mesma pergunta com o juiz | cerca de US$ 0,005 |
 | Uma pergunta roteada | de US$ 0,0002 (leve) a US$ 0,008 (forte) |
-| Avaliação completa | cerca de US$ 0,02 |
+| Avaliação completa (11 casos, com juiz) | US$ 0,055 |
+
+Indexação, pergunta no RAG e avaliação foram medidas em 16/11/2026 (detalhes na
+seção 7 de [docs/sistema.md](docs/sistema.md)).
 
 O `TETO_DIARIO_USD` (padrão US$ 2) bloqueia novas chamadas quando o gasto do
-dia passa do limite.
+dia passa do limite. O teto falha fechado: um valor inválido (`2,5`, com vírgula,
+por exemplo) ou um gasto do dia que não pôde ser lido no Supabase bloqueiam a
+chamada, em vez de desligar o limite em silêncio.
 
 ## Decisões e o que foi descartado
 
@@ -101,12 +107,14 @@ dia passa do limite.
 - **HNSW em vez de IVFFlat.** Não exige dados para treinar o índice e tem
   recall melhor com poucas linhas.
 - **Reranking com LLM em vez de Cohere ou cross-encoder.** Evita mais um
-  fornecedor e mais uma chave; uma chamada ao modelo leve avalia os 8 candidatos.
+  fornecedor e mais uma chave; uma chamada ao modelo leve avalia os 12 candidatos.
 - **Roteamento por classificador em vez de palavras-chave.** Regra fixa erra em
   paráfrases e não explica a decisão; o classificador devolve o motivo.
 - **Rubrica obrigatória no juiz.** Sem critérios fixos, a nota vira opinião e
-  duas execuções não são comparáveis. A justificativa vem antes das notas e o
-  juiz roda com temperatura 0.
+  duas execuções não são comparáveis. A justificativa vem antes das notas. O
+  juiz padrão (`gpt-6.1-sol`) raciocina e, por isso, não aceita temperatura: roda
+  com o padrão do modelo, 1 (a tela de parâmetros mostra isso). A consistência vem
+  da rubrica com âncoras e do schema estrito, não da temperatura.
 - **Sem LangChain ou LlamaIndex.** Num sistema deste tamanho o framework
   esconderia justamente custo e latência, que são o assunto da demonstração.
 - **Sem login.** O site é de apresentação. A chave `service_role` fica só no
@@ -115,7 +123,9 @@ dia passa do limite.
 
 ## Próximos passos
 
-- Streaming das respostas.
+- Rodada de avaliação sem reranking, para medir quanto de qualidade custaria economizar ~1,5 s.
+- Reescrita da pergunta com sinônimos do domínio antes da busca.
+- Fine-tuning (destilação) do classificador de roteamento, comparado por número.
 - Agregação da telemetria em view materializada quando passar de 1.000 chamadas.
-- Cache de embeddings de perguntas repetidas.
-- Busca iterativa do pgvector (`hnsw.iterative_scan`) se a base crescer e o filtro por coleção passar a cortar resultados.
+- Medir quanto a nota do juiz varia entre duas rodadas iguais (sem temperatura 0, ela não é garantida).
+- Busca iterativa do pgvector (`hnsw.iterative_scan`) se o Postgres passar a usar o índice HNSW com filtro de coleção: o índice traz ~40 vizinhos e só depois filtra, e uma coleção pequena (o projeto é 2% da base) voltaria quase vazia. Hoje, com 843 trechos, a busca filtrada vem completa.

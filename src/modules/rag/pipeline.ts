@@ -7,7 +7,13 @@ import type { Colecao } from "./corpus";
 import { reranquear } from "./rerank";
 import type { FiltroColecao, ModoBusca, Trecho, TrechoReranqueado } from "./tipos";
 
-export const CANDIDATOS = 8;
+/**
+ * 12 candidatos vão para o reranking e os 4 melhores viram o contexto.
+ * Eram 8: o caso "causas do atraso" da avaliação mostrou o documento certo ficando de
+ * fora. O reranker passou a receber cada trecho cortado em 700 caracteres, então 12
+ * candidatos custam o mesmo volume de tokens que os 8 inteiros custavam.
+ */
+export const CANDIDATOS = 12;
 export const CONTEXTO_FINAL = 4;
 
 const SISTEMA_RESPOSTA = `Você é o assistente da gerenciadora do Projeto Linha 3, uma obra de expansão industrial.

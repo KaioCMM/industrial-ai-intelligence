@@ -183,7 +183,7 @@ export default function PaginaRag() {
           <Interruptor
             rotulo="Reranking"
             termo="reranking"
-            detalhe="Um modelo leve reordena os 8 candidatos"
+            detalhe="Um modelo leve reordena os 12 candidatos"
             ligado={reranquear}
             aoMudar={setReranquear}
           />
